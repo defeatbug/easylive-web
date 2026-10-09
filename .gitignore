@@ -1,0 +1,20 @@
+# 依赖与构建产物
+node_modules/
+dist/
+dist-ssr/
+.vite/
+
+# 本地环境（可能含私网地址/密钥）
+.env
+.env.local
+.env.*.local
+*.local
+
+# 编辑器与系统文件
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*~
+*.log

@@ -1,0 +1,632 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ControlBar } from '../components/ControlBar'
+import { ShareDialog } from '../components/ShareDialog'
+import { SidePanel } from '../components/SidePanel'
+import { VideoTile } from '../components/VideoTile'
+import { useRoom } from '../hooks/useRoom'
+import { useDevices, type DeviceSelection } from '../lib/devices'
+import type { LinkStats } from '../lib/RoomClient'
+import { evaluateQuality } from '../lib/quality'
+
+interface MeetingRoomProps {
+  roomId: string
+  displayName: string
+  initialDevices: DeviceSelection
+  initialMicOn: boolean
+  initialCamOn: boolean
+  /** 会前页交接过来的预览流（刷新后自动回会时为 null，会重新申请） */
+  previewStream?: MediaStream | null
+  onLeave: () => void
+}
+
+interface Tile {
+  key: string
+  label: string
+  stream: MediaStream | null
+  isLocal: boolean
+  screen: boolean
+  muted: boolean
+  /** 该瓦片属于哪个参与者（用于每个发布者只保留一张屏幕卡片） */
+  owner: string
+  /** 角标：目前只用于标记"对方正在重连" */
+  badge?: string
+  /** 正在说话（来自服务端 active_speakers，而不是本地音量猜测） */
+  speaking?: boolean
+}
+
+/** 只剩两种布局：宫格 / 左侧访客栏。屏幕共享不再是一种"视图"，而是自动占据主舞台。 */
+type ViewMode = 'grid' | 'sidebar'
+type PanelTab = 'chat' | 'people' | 'stats'
+
+/**
+ * 会议主界面。
+ *
+ * 布局规则（有意做得很确定，避免"点了按钮又被自动切回去"）：
+ *   - 没有人共享屏幕 → 宫格（或左侧栏）
+ *   - 有人共享屏幕   → 屏幕占据主舞台，摄像头缩成右下角小窗（可点击换到主舞台）
+ *   - 左侧栏模式     → 访客卡片竖排在左侧，主舞台在右边（两种情况下都可用）
+ */
+export function MeetingRoom({
+  roomId,
+  displayName,
+  initialDevices,
+  initialMicOn,
+  initialCamOn,
+  previewStream,
+  onLeave,
+}: MeetingRoomProps) {
+  const { client, snapshot, error } = useRoom(true, roomId, displayName, {
+    devices: initialDevices,
+    micOn: initialMicOn,
+    camOn: initialCamOn,
+    previewStream,
+  })
+  const { mics, cams } = useDevices()
+
+  const [panelOpen, setPanelOpen] = useState(false)
+  const [tab, setTab] = useState<PanelTab>('chat')
+  const [view, setView] = useState<ViewMode>('grid')
+  const [activeKey, setActiveKey] = useState<string | null>(null)
+  const [shareOpen, setShareOpen] = useState(false)
+  const [micId, setMicId] = useState<string | undefined>(initialDevices.micId)
+  const [camId, setCamId] = useState<string | undefined>(initialDevices.camId)
+
+  // 快捷键：m 静音 / v 摄像头 / s 屏幕共享
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') return
+      if (!client) return
+      if (e.key === 'm') client.setMicEnabled(!snapshot.micEnabled)
+      if (e.key === 'v') client.setCamEnabled(!snapshot.camEnabled)
+      if (e.key === 's') void (snapshot.screenStream ? client.stopScreenShare() : client.startScreenShare())
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [client, snapshot.micEnabled, snapshot.camEnabled, snapshot.screenStream])
+
+  const tiles = useMemo<Tile[]>(() => {
+    const out: Tile[] = []
+    const selfId = snapshot.self?.id ?? 'self'
+    // 服务端按 RFC 6464 音频电平判定的活跃说话人集合
+    const speaking = new Set(snapshot.speakers.map((sp) => sp.participantId))
+
+    // 本地卡片始终存在（设备没打开/摄像头关闭时渲染成头像占位）
+    out.push({
+      key: 'local',
+      label: `${displayName}（我）`,
+      stream: snapshot.camEnabled ? snapshot.localStream : null,
+      isLocal: true,
+      screen: false,
+      muted: !snapshot.micEnabled,
+      owner: selfId,
+      speaking: speaking.has(selfId),
+      badge: snapshot.hands.includes(selfId) ? '✋ 举手' : undefined,
+    })
+    if (snapshot.screenStream) {
+      out.push({
+        key: 'local-screen',
+        label: `${displayName} 的屏幕`,
+        stream: snapshot.screenStream,
+        isLocal: true,
+        screen: true,
+        muted: false,
+        owner: selfId,
+      })
+    }
+
+    for (const p of snapshot.participants) {
+      if (p.id === snapshot.self?.id) continue
+      const tracks = snapshot.tracks.filter((t) => t.publisherId === p.id)
+      const cam = tracks.find((t) => t.kind === 'video' && t.source !== 'screen')
+      const audio = tracks.find((t) => t.kind === 'audio')
+
+      // 角标优先级：举手（需要回应）> 重连中（画面会卡住，但状态自己会恢复）
+      const raised = snapshot.hands.includes(p.id)
+      const reconnecting = raised ? '✋ 举手' : p.state === 'reconnecting' ? '重连中' : undefined
+
+      out.push({
+        key: `cam-${p.id}`,
+        label: p.name,
+        // 摄像头被对方关掉时给 null，让瓦片显示头像而不是黑屏
+        stream: cam && !cam.muted ? (snapshot.remoteStreams[cam.id] ?? null) : null,
+        isLocal: false,
+        screen: false,
+        muted: !!audio?.muted,
+        owner: p.id,
+        badge: reconnecting,
+        speaking: speaking.has(p.id),
+      })
+
+      // 防御：同一个发布者只保留**最后一条**屏幕轨。
+      // 正常情况下不该出现多条（服务端轨道下线 + 客户端 unpublish 已经闭环），
+      // 但万一有陈旧轨道，也不该让界面上冒出两张屏幕卡片。
+      const screens = tracks.filter((t) => t.source === 'screen')
+      const latest = screens[screens.length - 1]
+      if (latest) {
+        out.push({
+          key: `screen-${latest.id}`,
+          label: `${p.name} 的屏幕`,
+          stream: snapshot.remoteStreams[latest.id] ?? null,
+          isLocal: false,
+          screen: true,
+          muted: false,
+          owner: p.id,
+          badge: reconnecting,
+          speaking: speaking.has(p.id),
+        })
+      }
+    }
+    return out
+  }, [snapshot, displayName])
+
+  /**
+   * 远端音频：**与视觉布局解耦**。
+   * 屏幕共享布局下我们不再渲染其他访客的瓦片，如果声音靠瓦片里的 <video> 播放，
+   * 那些人的声音就会一起消失。所以每个远端参与者单独挂一个 <audio>，任何布局下都能听见。
+   */
+  const remoteAudios = useMemo(() => {
+    const out: Array<{ id: string; stream: MediaStream }> = []
+    for (const p of snapshot.participants) {
+      if (p.id === snapshot.self?.id) continue
+      const audio = snapshot.tracks.find((t) => t.publisherId === p.id && t.kind === 'audio')
+      if (!audio) continue
+      const stream = snapshot.remoteStreams[audio.id]
+      if (stream) out.push({ id: audio.id, stream })
+    }
+    return out
+  }, [snapshot])
+
+  const screenTiles = tiles.filter((t) => t.screen)
+  const hasScreen = screenTiles.length > 0
+
+  // 主舞台：手动选中的优先；否则有人共享就默认给屏幕，没人共享就用第一张
+  const activeTile =
+    tiles.find((t) => t.key === activeKey) ?? screenTiles[0] ?? tiles[0] ?? null
+  const quality = evaluateQuality(snapshot.stats)
+  // 顶部"谁在说话"：把 participantId 换成显示名
+  const speakerNames = snapshot.speakers
+    .map((sp) => (sp.participantId === snapshot.self?.id ? '我' : (snapshot.participants.find((p) => p.id === sp.participantId)?.name ?? '')))
+    .filter((n) => n !== '')
+
+  return (
+    <div className="flex h-full flex-col bg-[var(--bg)]">
+      <header className="flex items-center gap-3 px-4 py-2.5">
+        <span className="text-sm font-medium text-neutral-200">{roomId}</span>
+        <ConnectionPill connection={snapshot.connection} />
+        <span className="text-xs text-neutral-500">{snapshot.participants.length} 人在线</span>
+        {hasScreen && <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[11px] text-sky-300">正在共享屏幕</span>}
+        {speakerNames.length > 0 && (
+          <span className="flex items-center gap-1.5 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[11px] text-emerald-300">
+            <span className="flex h-3 items-end gap-[2px]">
+              <span className="w-[2px] animate-pulse rounded-sm bg-emerald-400" style={{ height: '60%' }} />
+              <span className="w-[2px] animate-pulse rounded-sm bg-emerald-400" style={{ height: '100%' }} />
+              <span className="w-[2px] animate-pulse rounded-sm bg-emerald-400" style={{ height: '40%' }} />
+            </span>
+            {speakerNames.join('、')} 正在说话
+          </span>
+        )}
+
+        <div className="ml-auto flex items-center gap-3">
+          <div className="hidden items-center gap-2 sm:flex" title={`网络质量：${quality.label}（${quality.score}）`}>
+            <span className={`h-2 w-2 rounded-full ${quality.dot}`} />
+            <span className={`text-[11px] font-medium ${quality.text}`}>{quality.label}</span>
+          </div>
+          <StatsInline stats={snapshot.stats} />
+        </div>
+      </header>
+
+      {snapshot.connection === 'reconnecting' && (
+        <div className="mx-4 mb-2 flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+          <span className="h-2 w-2 animate-pulse rounded-full bg-amber-400" />
+          <span className="min-w-0 flex-1">
+            信令连接已断开，正在自动重连（第 {snapshot.reconnectAttempt} 次）… 画面保持最后一帧，恢复后不会中断
+          </span>
+        </div>
+      )}
+
+      {error && (
+        <div className="mx-4 mb-2 flex items-center gap-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+          <span className="min-w-0 flex-1">{error}</span>
+          {snapshot.connection === 'closed' && (
+            <button
+              onClick={() => client?.retryConnect()}
+              className="shrink-0 rounded border border-red-400/40 px-2 py-1 font-medium transition hover:bg-red-500/20"
+            >
+              重新连接
+            </button>
+          )}
+          {!snapshot.localStream && (
+            <button
+              onClick={() => void client?.retryLocalMedia()}
+              className="shrink-0 rounded border border-red-400/40 px-2 py-1 font-medium transition hover:bg-red-500/20"
+            >
+              重试打开设备
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="flex min-h-0 flex-1">
+        <main className="relative flex min-h-0 flex-1 flex-col">
+          {/* 表情浮层：绝对定位、不参与排版、不拦截鼠标 */}
+          {snapshot.reactions.length > 0 && (
+            <div className="pointer-events-none absolute bottom-28 left-4 z-10 flex flex-col-reverse gap-2">
+              {snapshot.reactions.map((r) => (
+                <div
+                  key={r.id}
+                  className="reaction-float flex items-center gap-2 rounded-full bg-black/65 px-3 py-1.5 shadow-lg"
+                >
+                  <span className="text-xl leading-none">{r.emoji}</span>
+                  <span className="text-xs text-neutral-300">
+                    {r.fromId === snapshot.self?.id ? '我' : r.fromName}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-2">
+            {tiles.length === 0 ? (
+              <p className="py-24 text-center text-sm text-neutral-500">等待其他人加入…</p>
+            ) : view === 'sidebar' && activeTile ? (
+              <SidebarLayout
+                active={activeTile}
+                tiles={tiles}
+                onSelect={setActiveKey}
+                onToggleSidebar={() => setView('grid')}
+              />
+            ) : hasScreen && activeTile ? (
+              <StageWithPip
+                stage={activeTile}
+                // 右下角只放"当前共享屏幕那位"的摄像头；其他访客不在这里出现
+                // （想看全部就切到左侧访客栏布局）
+                presenterCam={
+                  tiles.find((t) => t.owner === activeTile.owner && !t.screen) ?? null
+                }
+                onToggleSidebar={() => setView('sidebar')}
+              />
+            ) : (
+              <GridView tiles={tiles} />
+            )}
+          </div>
+
+          <ControlBar
+            micEnabled={snapshot.micEnabled}
+            camEnabled={snapshot.camEnabled}
+            screenSharing={!!snapshot.screenStream}
+            chatOpen={panelOpen && tab === 'chat'}
+            statsOpen={panelOpen && tab === 'stats'}
+            view={view}
+            mics={mics}
+            cams={cams}
+            micId={micId}
+            camId={camId}
+            onToggleMic={() => client?.setMicEnabled(!snapshot.micEnabled)}
+            onToggleCam={() => client?.setCamEnabled(!snapshot.camEnabled)}
+            onToggleScreen={() =>
+              void (snapshot.screenStream ? client?.stopScreenShare() : client?.startScreenShare())
+            }
+            onToggleView={() => setView(view === 'grid' ? 'sidebar' : 'grid')}
+            onShare={() => setShareOpen(true)}
+            onToggleChat={() => {
+              setPanelOpen(!(panelOpen && tab === 'chat'))
+              setTab('chat')
+            }}
+            onToggleStats={() => {
+              setPanelOpen(!(panelOpen && tab === 'stats'))
+              setTab('stats')
+            }}
+            onSelectMic={(id) => {
+              setMicId(id)
+              void client?.switchMicrophone(id)
+            }}
+            onSelectCam={(id) => {
+              setCamId(id)
+              void client?.switchCamera(id)
+            }}
+            handRaised={snapshot.hands.includes(snapshot.self?.id ?? '')}
+            dataChannelReady={snapshot.dataChannelReady}
+            onToggleHand={() => client?.toggleHand()}
+            onReaction={(emoji) => client?.sendReaction(emoji)}
+            onLeave={() => {
+              client?.leave()
+              onLeave()
+            }}
+          />
+        </main>
+
+        {panelOpen && (
+          <SidePanel
+            tab={tab}
+            onTabChange={setTab}
+            onClose={() => setPanelOpen(false)}
+            chat={snapshot.chat}
+            selfId={snapshot.self?.id ?? null}
+            participants={snapshot.participants}
+            hands={snapshot.hands}
+            speakers={snapshot.speakers}
+            stats={snapshot.stats}
+            onSend={(t) => client?.sendChat(t)}
+          />
+        )}
+      </div>
+
+      {/* 远端音频（隐藏元素，不参与排版） */}
+      {remoteAudios.map(({ id, stream }) => (
+        <RemoteAudio key={id} stream={stream} />
+      ))}
+
+      {shareOpen && <ShareDialog roomId={roomId} onClose={() => setShareOpen(false)} />}
+    </div>
+  )
+}
+
+/** 只负责播放远端声音的隐藏元素。 */
+function RemoteAudio({ stream }: { stream: MediaStream }) {
+  const ref = useRef<HTMLAudioElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    if (el.srcObject !== stream) el.srcObject = stream
+    void el.play().catch(() => {})
+  }, [stream])
+  return <audio ref={ref} autoPlay />
+}
+
+/** 纯宫格：没有人共享屏幕时使用（保持原来的观感：固定断点 + 16:9 宽度驱动） */
+function GridView({ tiles }: { tiles: Tile[] }) {
+  const cols =
+    tiles.length <= 1
+      ? 'grid-cols-1'
+      : tiles.length <= 4
+        ? 'grid-cols-1 sm:grid-cols-2'
+        : 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-3'
+  return (
+    <div className={`grid gap-3 ${cols}`}>
+      {tiles.map((t) => (
+        <VideoTile
+          key={t.key}
+          stream={t.stream}
+          label={t.label}
+          mirrored={t.isLocal && !t.screen}
+          muted={t.muted}
+          badge={t.badge}
+          speaking={t.speaking}
+        />
+      ))}
+    </div>
+  )
+}
+
+/**
+ * 屏幕共享布局：屏幕占满主舞台（contain 显示，文字不被裁切），
+ * **当前共享屏幕那位的摄像头**缩成一个小窗浮在上面，可用鼠标拖动到任意位置
+ * （双击回到右下角默认位置）。
+ */
+function StageWithPip({
+  stage,
+  presenterCam,
+  onToggleSidebar,
+}: {
+  stage: Tile
+  presenterCam: Tile | null
+  onToggleSidebar: () => void
+}) {
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const pipRef = useRef<HTMLDivElement>(null)
+  /** null = 默认右下角；有值表示用户拖动过 */
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null)
+  const drag = useRef<{
+    pointerX: number
+    pointerY: number
+    originX: number
+    originY: number
+    maxX: number
+    maxY: number
+    w: number
+    h: number
+    moved: boolean
+  } | null>(null)
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    const wrap = wrapRef.current
+    const pip = pipRef.current
+    if (!wrap || !pip) return
+    const wr = wrap.getBoundingClientRect()
+    const pr = pip.getBoundingClientRect()
+    drag.current = {
+      pointerX: e.clientX,
+      pointerY: e.clientY,
+      originX: pr.left - wr.left,
+      originY: pr.top - wr.top,
+      maxX: wr.width - pr.width,
+      maxY: wr.height - pr.height,
+      w: wr.width,
+      h: wr.height,
+      moved: false,
+    }
+    // 捕获指针：拖到窗口外面也能继续收到 move 事件
+    pip.setPointerCapture(e.pointerId)
+  }
+
+  const onPointerMove = (e: React.PointerEvent) => {
+    const d = drag.current
+    if (!d) return
+    const dx = e.clientX - d.pointerX
+    const dy = e.clientY - d.pointerY
+    if (!d.moved && Math.abs(dx) + Math.abs(dy) < 3) return // 抖动阈值，避免误判为拖动
+    d.moved = true
+    setPos({
+      x: clamp(d.originX + dx, 0, Math.max(0, d.maxX)),
+      y: clamp(d.originY + dy, 0, Math.max(0, d.maxY)),
+    })
+  }
+
+  const endDrag = (e: React.PointerEvent) => {
+    drag.current = null
+    pipRef.current?.releasePointerCapture(e.pointerId)
+  }
+
+  // 窗口尺寸变化后把小窗夹回可视范围内，避免"拖出去就找不回来了"
+  useEffect(() => {
+    if (!pos) return
+    const onResize = () => {
+      const wrap = wrapRef.current
+      const pip = pipRef.current
+      if (!wrap || !pip) return
+      const wr = wrap.getBoundingClientRect()
+      const pr = pip.getBoundingClientRect()
+      setPos((p) =>
+        p ? { x: clamp(p.x, 0, Math.max(0, wr.width - pr.width)), y: clamp(p.y, 0, Math.max(0, wr.height - pr.height)) } : p,
+      )
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [pos])
+
+  return (
+    <div ref={wrapRef} className="relative h-full min-h-0 overflow-hidden">
+      <VideoTile
+        stream={stage.stream}
+        label={stage.label}
+        screen={stage.screen}
+        mirrored={stage.isLocal && !stage.screen}
+        muted={stage.muted}
+        badge={stage.badge}
+        speaking={stage.speaking}
+        onToggleSidebar={onToggleSidebar}
+        fit="stage"
+      />
+
+      {presenterCam?.stream && (
+        <div
+          ref={pipRef}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+          onDoubleClick={() => setPos(null)}
+          style={pos ? { left: pos.x, top: pos.y } : { right: 12, bottom: 12 }}
+          title="拖动可移动位置，双击回到右下角"
+          className="absolute w-28 cursor-grab touch-none select-none active:cursor-grabbing sm:w-40"
+        >
+          <PipVideo stream={presenterCam.stream} label={presenterCam.label} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** 小窗里的画面：不挂任何交互（拖动与双击都由外层容器负责） */
+function PipVideo({ stream, label }: { stream: MediaStream | null; label: string }) {
+  const ref = useRef<HTMLVideoElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    if (el.srcObject !== stream) el.srcObject = stream
+    if (stream) void el.play().catch(() => {})
+  }, [stream])
+
+  return (
+    <div className="relative overflow-hidden rounded-lg bg-black shadow-lg ring-1 ring-white/15">
+      <video ref={ref} autoPlay playsInline muted className="aspect-video w-full object-cover" />
+      <span className="absolute bottom-1 left-1 max-w-[90%] truncate rounded bg-black/60 px-1 text-[10px] text-white/90">
+        {label}
+      </span>
+    </div>
+  )
+}
+
+function clamp(v: number, min: number, max: number): number {
+  return Math.min(Math.max(v, min), max)
+}
+
+/** 左侧访客栏：一列竖排卡片 + 右侧主舞台 */
+function SidebarLayout({
+  active,
+  tiles,
+  onSelect,
+  onToggleSidebar,
+}: {
+  active: Tile
+  tiles: Tile[]
+  onSelect: (key: string) => void
+  onToggleSidebar: () => void
+}) {
+  return (
+    <div className="flex h-full min-h-0 gap-3">
+      {/* p-1 保证选中态 ring 不被 overflow 裁掉 */}
+      <aside className="flex w-40 shrink-0 flex-col gap-2 overflow-y-auto p-1 sm:w-44">
+        {tiles.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => onSelect(t.key)}
+            className={`shrink-0 overflow-hidden rounded-lg text-left transition ${
+              t.key === active.key ? 'ring-2 ring-[var(--accent)]' : 'opacity-60 hover:opacity-100'
+            }`}
+            title={t.label}
+          >
+            <VideoTile
+              stream={t.stream}
+              label={t.label}
+              screen={t.screen}
+              muted={t.muted}
+              badge={t.badge}
+              speaking={t.speaking}
+            />
+          </button>
+        ))}
+      </aside>
+
+      <div className="h-full min-h-0 flex-1">
+        <VideoTile
+          stream={active.stream}
+          label={active.label}
+          screen={active.screen}
+          mirrored={active.isLocal && !active.screen}
+          muted={active.muted}
+          speaking={active.speaking}
+          onToggleSidebar={onToggleSidebar}
+          sidebarOpen
+          fit="stage"
+        />
+      </div>
+    </div>
+  )
+}
+
+function ConnectionPill({ connection }: { connection: string }) {
+  const style: Record<string, string> = {
+    connected: 'bg-emerald-500/15 text-emerald-400',
+    connecting: 'bg-amber-500/15 text-amber-400',
+    reconnecting: 'bg-amber-500/15 text-amber-400',
+    closed: 'bg-white/10 text-neutral-400',
+    idle: 'bg-white/10 text-neutral-400',
+  }
+  const text: Record<string, string> = {
+    connected: '已连接',
+    connecting: '连接中',
+    reconnecting: '重连中',
+    closed: '已断开',
+    idle: '待连接',
+  }
+  return (
+    <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${style[connection] ?? style.idle}`}>
+      {text[connection] ?? connection}
+    </span>
+  )
+}
+
+function StatsInline({ stats }: { stats: LinkStats | null }) {
+  if (!stats) return null
+  return (
+    <span className="hidden items-center gap-3 font-mono text-[11px] text-neutral-500 lg:flex">
+      <span>RTT {stats.rttMs}ms</span>
+      <span>丢包 {stats.lossRate}%</span>
+      <span>↑{stats.outKbps}</span>
+      <span>↓{stats.inKbps}</span>
+      <span className={stats.candidateType === 'relay' ? 'text-amber-400' : ''}>{stats.candidateType}</span>
+    </span>
+  )
+}
