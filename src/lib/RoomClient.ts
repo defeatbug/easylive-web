@@ -92,6 +92,50 @@ const RECONNECT_BASE_MS = 500
 const RECONNECT_MAX_MS = 8000
 const RECONNECT_MAX_ATTEMPTS = 8
 
+/**
+ * 断线恢复令牌的持久化键。
+ *
+ * 为什么必须持久化：**刷新页面**时浏览器会直接杀掉进程，WebSocket 断开时来不及发 `leave`，
+ * 服务端只能把该参与者标记为"重连中"并进入宽限期。如果这时候前端不带 `resumeToken`
+ * 重新入会，服务端就会把它当成**新参与者**——于是每刷新一次就多一个幽灵，
+ * 连续刷新十几下就能看到一屏"重连中"（它们还会占用房间人数上限）。
+ *
+ * 带上令牌 + resetMedia 之后：刷新 = 恢复同一个身份，刷新前后的瓦片是同一张。
+ */
+function resumeStorageKey(roomId: string): string {
+  return `easylive.resume.${roomId}`
+}
+
+function loadResumeToken(roomId: string): string | null {
+  try {
+    const raw = sessionStorage.getItem(resumeStorageKey(roomId))
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as { token?: string; at?: number }
+    if (!parsed.token) return null
+    // 服务端宽限期默认 30s，超过这个时间的令牌肯定已经失效，直接丢掉避免无谓的一次失败恢复
+    if (parsed.at && Date.now() - parsed.at > 25_000) return null
+    return parsed.token
+  } catch {
+    return null
+  }
+}
+
+function saveResumeToken(roomId: string, token: string) {
+  try {
+    sessionStorage.setItem(resumeStorageKey(roomId), JSON.stringify({ token, at: Date.now() }))
+  } catch {
+    /* 隐私模式下 sessionStorage 可能不可用：退化为每次都是新参与者，不影响可用性 */
+  }
+}
+
+function clearResumeToken(roomId: string) {
+  try {
+    sessionStorage.removeItem(resumeStorageKey(roomId))
+  } catch {
+    /* 忽略 */
+  }
+}
+
 function wsURLFromLocation(): string {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   return `${proto}://${location.host}/ws`
@@ -155,6 +199,8 @@ export class RoomClient {
   constructor(opts: RoomClientOptions) {
     this.opts = opts
     this.token = opts.token ?? null
+    // 刷新后自动带上上次的恢复令牌（同一房间、且在宽限期内）
+    this.resumeToken = loadResumeToken(opts.roomId)
     this.snapshot = {
       connection: 'idle',
       roomId: opts.roomId,
@@ -204,13 +250,28 @@ export class RoomClient {
     this.update({ connection: 'connected' })
     this.createPeerConnections()
 
-    // 入会并等待 joined（joined 里带回房间快照）
+    // 入会并等待 joined（joined 里带回房间快照）。
+    //
+    // 若带着上次的恢复令牌：这是一次**页面刷新**（新页面还没有任何 PeerConnection），
+    // 所以必须同时置 resetMedia —— 让服务端清掉刷新前那套已经死掉的轨道，
+    // 否则会留下"永远停在最后一帧"的旧瓦片。
+    const hasResume = !!this.resumeToken
     const joined = await this.request(
-      { type: 'join', roomId: this.opts.roomId, displayName: this.opts.displayName, token: this.token ?? undefined },
+      {
+        type: 'join',
+        roomId: this.opts.roomId,
+        displayName: this.opts.displayName,
+        token: this.token ?? undefined,
+        resumeToken: this.resumeToken ?? undefined,
+        resetMedia: hasResume || undefined,
+      },
       ['joined'],
       10000,
     )
-    if (joined.resumeToken) this.resumeToken = joined.resumeToken
+    if (joined.resumeToken) {
+      this.resumeToken = joined.resumeToken
+      saveResumeToken(this.opts.roomId, joined.resumeToken)
+    }
     this.update({ grants: decodeGrant(this.token), notice: null })
     const self = joined.room?.participants.find((p) => p.id === joined.participantId) ?? null
     this.update({
@@ -355,7 +416,10 @@ export class RoomClient {
       ['joined'],
       10000,
     )
-    if (joined.resumeToken) this.resumeToken = joined.resumeToken
+    if (joined.resumeToken) {
+      this.resumeToken = joined.resumeToken
+      saveResumeToken(this.opts.roomId, joined.resumeToken)
+    }
 
     if (joined.resumed && !resetMedia) {
       // ---- 就地恢复：媒体面还活着，只把可能已死的传输拉起来 ----
@@ -846,6 +910,9 @@ export class RoomClient {
 
   leave() {
     this.closed = true
+    // 主动离开：清掉恢复令牌。否则下次打开这一页会尝试"恢复身份"，
+    // 而那个参与者其实已经正常离会了，恢复必然失败、白等一次往返。
+    clearResumeToken(this.opts.roomId)
     this.myScreenTrackId = null
     if (this.reconnectTimer) {
       window.clearTimeout(this.reconnectTimer)
