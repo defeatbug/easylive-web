@@ -15,6 +15,9 @@ interface SidePanelProps {
   hands: string[]
   /** 正在说话的人：成员列表据此把它们排到前面（视频区不重排，避免画面跳动） */
   speakers: SpeakerInfo[]
+  /** 自己是否拥有主持人权限（来自令牌；服务端会独立校验） */
+  isAdmin: boolean
+  onModerate: (action: 'mute' | 'kick', targetId: string) => void
   stats: LinkStats | null
   onSend: (text: string) => void
 }
@@ -33,6 +36,8 @@ export function SidePanel({
   participants,
   hands,
   speakers,
+  isAdmin,
+  onModerate,
   stats,
   onSend,
 }: SidePanelProps) {
@@ -63,7 +68,14 @@ export function SidePanel({
 
       {tab === 'chat' && <ChatList chat={chat} selfId={selfId} onSend={onSend} />}
       {tab === 'people' && (
-        <PeopleList participants={participants} selfId={selfId} hands={hands} speakers={speakers} />
+        <PeopleList
+          participants={participants}
+          selfId={selfId}
+          hands={hands}
+          speakers={speakers}
+          isAdmin={isAdmin}
+          onModerate={onModerate}
+        />
       )}
       {tab === 'stats' && <StatsView stats={stats} />}
     </aside>
@@ -171,11 +183,15 @@ function PeopleList({
   selfId,
   hands,
   speakers,
+  isAdmin,
+  onModerate,
 }: {
   participants: PeerInfo[]
   selfId: string | null
   hands: string[]
   speakers: SpeakerInfo[]
+  isAdmin: boolean
+  onModerate: (action: 'mute' | 'kick', targetId: string) => void
 }) {
   // 正在说话的人排前面：这是"排序"最合适的位置——
   // 视频区按音量重排会让画面不断跳动，成员列表重排则完全可预期。
@@ -200,8 +216,28 @@ function PeopleList({
               {order.has(p.id) && <span className="ml-1 text-[10px] text-emerald-400">说话中</span>}
               {p.id === selfId && <span className="ml-1 text-xs text-[var(--accent)]">（我）</span>}
             </p>
-            <p className="truncate text-[10px] text-neutral-500">{p.id}</p>
+            <p className="truncate text-[10px] text-neutral-500">{p.identity ?? p.id}</p>
           </div>
+
+          {/* 主持人操作：只对别人显示。前端只是隐藏按钮，权限由服务端校验 */}
+          {isAdmin && p.id !== selfId && (
+            <span className="flex shrink-0 gap-1">
+              <button
+                onClick={() => onModerate('mute', p.id)}
+                title="强制静音（服务端停止转发其音频）"
+                className="rounded px-1.5 py-1 text-[10px] text-amber-300 transition hover:bg-amber-500/15"
+              >
+                静音
+              </button>
+              <button
+                onClick={() => onModerate('kick', p.id)}
+                title="移出房间"
+                className="rounded px-1.5 py-1 text-[10px] text-red-300 transition hover:bg-red-500/15"
+              >
+                移出
+              </button>
+            </span>
+          )}
         </div>
       ))}
     </div>

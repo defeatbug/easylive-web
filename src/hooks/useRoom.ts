@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import { RoomClient, type RoomSnapshot } from '../lib/RoomClient'
+import { fetchToken } from '../lib/token'
 import { buildConstraints, type DeviceSelection } from '../lib/devices'
 
 const EMPTY: RoomSnapshot = {
@@ -14,6 +15,8 @@ const EMPTY: RoomSnapshot = {
   hands: [],
   reactions: [],
   dataChannelReady: false,
+  grants: null,
+  notice: null,
   localStream: null,
   screenStream: null,
   micEnabled: true,
@@ -29,6 +32,10 @@ export interface JoinOptions {
   camOn: boolean
   /** 会前页已经拿到的预览流：直接交接复用，不要停掉再重新申请（会撞设备释放竞态） */
   previewStream?: MediaStream | null
+  /** 令牌身份；缺省用昵称（无鉴权模式下两者等价） */
+  identity?: string
+  /** 是否申请主持人权限。仅用于本地演示：生产环境应由登录系统决定，不能由前端申请 */
+  asAdmin?: boolean
 }
 
 /**
@@ -42,7 +49,7 @@ export function useRoom(active: boolean, roomId: string, displayName: string, jo
   const [client, setClient] = useState<RoomClient | null>(null)
   const [localError, setLocalError] = useState<string | null>(null)
 
-  const { devices, micOn, camOn, previewStream } = join
+  const { devices, micOn, camOn, previewStream, identity, asAdmin } = join
 
   useEffect(() => {
     if (!active || !roomId || !displayName) return
@@ -59,12 +66,24 @@ export function useRoom(active: boolean, roomId: string, displayName: string, jo
     // 延后一拍后，首次挂载的启动会被 cleanup 直接取消，等于什么都没发生。
     const timer = window.setTimeout(() => {
       if (cancelled) return
-      const c = new RoomClient({ roomId, displayName, onError: (m) => setLocalError(m) })
-      client = c
-      setClient(c)
 
       void (async () => {
         try {
+          // 先申请令牌：服务端 AUTH_MODE=off 时 /token 返回 501，这里拿到 null，
+          // 照常以无令牌方式入会（保证本地演示开箱可用）。
+          const token = await fetchToken({
+            roomId,
+            identity: identity ?? displayName,
+            name: displayName,
+            roomAdmin: asAdmin,
+          })
+          // 关键：await 之后必须重新检查 cancelled，否则 StrictMode 下会留下"僵尸连接"
+          if (cancelled) return
+
+          const c = new RoomClient({ roomId, displayName, token, onError: (m) => setLocalError(m) })
+          client = c
+          setClient(c)
+
           await c.connect()
           // 一律先把音视频都发布出去，再按会前页的选择静音/关闭——
           // 否则关掉摄像头入会后就再也无法"打开摄像头"（本地根本没有轨道可启用）。
@@ -85,7 +104,7 @@ export function useRoom(active: boolean, roomId: string, displayName: string, jo
     }
     // devices 是对象，用字段级依赖避免每次渲染都重连
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, roomId, displayName, devices.micId, devices.camId, micOn, camOn, previewStream])
+  }, [active, roomId, displayName, devices.micId, devices.camId, micOn, camOn, previewStream, identity, asAdmin])
 
   const subscribe = useCallback((cb: () => void) => (client ? client.subscribe(cb) : () => {}), [client])
   const getSnapshot = useCallback(() => (client ? client.getSnapshot() : EMPTY), [client])

@@ -18,6 +18,7 @@ export type MsgType =
   | 'mute'
   | 'chat'
   | 'ping'
+  | 'moderate' // 主持人操作：mute | kick（需要 roomAdmin）
   // 服务端 -> 客户端
   | 'joined'
   | 'participant_state'
@@ -30,6 +31,7 @@ export type MsgType =
   | 'track_muted'
   | 'active_speakers'
   | 'hand_state'
+  | 'force_mute'
   | 'chat_message'
   | 'pong'
   | 'error'
@@ -51,9 +53,24 @@ export interface Candidate {
   sdpMLineIndex?: number | null
 }
 
+/**
+ * 令牌权限（与服务端 auth.VideoGrant 对齐，字段名参照 LiveKit）。
+ * 前端只用它做 UI 取舍；真正的校验在服务端。
+ */
+export interface VideoGrant {
+  roomJoin: boolean
+  room?: string
+  canPublish: boolean
+  canSubscribe: boolean
+  canPublishData: boolean
+  roomAdmin: boolean
+}
+
 export interface PeerInfo {
   id: string
   name: string
+  /** 令牌身份（跨重连稳定），无鉴权模式下等于昵称 */
+  identity?: string
   joinedAt: number
   /** 缺省等价于 active（兼容旧服务端） */
   state?: ParticipantState
@@ -124,6 +141,11 @@ export interface Message {
   // 请求载荷
   roomId?: string
   displayName?: string
+  /** 鉴权令牌（JWT）；AUTH_MODE=required 时必带 */
+  token?: string
+  /** 主持人操作的载荷 */
+  targetId?: string
+  action?: string
   /** 断线重连时带上；命中则恢复同一 participantId（服务端返回 resumed=true） */
   resumeToken?: string
   /**

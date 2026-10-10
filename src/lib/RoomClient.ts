@@ -20,7 +20,9 @@ import type {
   Reaction,
   SpeakerInfo,
   TrackInfo,
+  VideoGrant,
 } from './protocol'
+import { decodeGrant } from './token'
 
 export interface LinkStats {
   rttMs: number
@@ -52,6 +54,10 @@ export interface RoomSnapshot {
   reactions: Reaction[]
   /** 数据通道是否就绪（表情/举手依赖它） */
   dataChannelReady: boolean
+  /** 令牌权限（仅用于 UI 取舍；服务端会独立校验） */
+  grants: VideoGrant | null
+  /** 非错误类提示（如"你已被主持人静音"） */
+  notice: string | null
   localStream: MediaStream | null
   screenStream: MediaStream | null
   micEnabled: boolean
@@ -67,6 +73,8 @@ export interface RoomClientOptions {
   wsUrl?: string
   roomId: string
   displayName: string
+  /** 鉴权令牌（JWT）。为空表示服务端未启用鉴权 */
+  token?: string | null
   iceServers?: RTCIceServer[]
   onError?: (msg: string) => void
 }
@@ -129,6 +137,9 @@ export class RoomClient {
   /** 数据通道：pubDC 由本端创建（上行）；服务端反向开的通道在 ondatachannel 里直接挂监听 */
   private pubDC: RTCDataChannel | null = null
 
+  /** 鉴权令牌：断线重连时复用同一个令牌（身份不变，恢复才不会失败） */
+  private token: string | null
+
   /** 服务端下发的恢复令牌：断线重连时带上即可恢复同一参与者身份（M4） */
   private resumeToken: string | null = null
   private reconnectAttempt = 0
@@ -143,6 +154,7 @@ export class RoomClient {
 
   constructor(opts: RoomClientOptions) {
     this.opts = opts
+    this.token = opts.token ?? null
     this.snapshot = {
       connection: 'idle',
       roomId: opts.roomId,
@@ -155,6 +167,8 @@ export class RoomClient {
       hands: [],
       reactions: [],
       dataChannelReady: false,
+      grants: null,
+      notice: null,
       localStream: null,
       screenStream: null,
       micEnabled: true,
@@ -191,8 +205,13 @@ export class RoomClient {
     this.createPeerConnections()
 
     // 入会并等待 joined（joined 里带回房间快照）
-    const joined = await this.request({ type: 'join', roomId: this.opts.roomId, displayName: this.opts.displayName }, ['joined'], 10000)
+    const joined = await this.request(
+      { type: 'join', roomId: this.opts.roomId, displayName: this.opts.displayName, token: this.token ?? undefined },
+      ['joined'],
+      10000,
+    )
     if (joined.resumeToken) this.resumeToken = joined.resumeToken
+    this.update({ grants: decodeGrant(this.token), notice: null })
     const self = joined.room?.participants.find((p) => p.id === joined.participantId) ?? null
     this.update({
       self,
@@ -329,6 +348,7 @@ export class RoomClient {
         type: 'join',
         roomId: this.opts.roomId,
         displayName: this.opts.displayName,
+        token: this.token ?? undefined,
         resumeToken: this.resumeToken ?? undefined,
         resetMedia: resetMedia || undefined,
       },
@@ -775,6 +795,26 @@ export class RoomClient {
     this.sendData({ type: 'raise_hand', raised })
   }
 
+  /** 清掉提示条（用户点"知道了"） */
+  clearNotice() {
+    this.update({ notice: null })
+  }
+
+  // ---------- 主持人管理 ----------
+
+  /**
+   * 执行主持人操作。服务端会校验 roomAdmin；失败时 request() 会以 error 拒绝，
+   * 调用方据此给出提示（前端不自己判断权限，避免"看起来能点但必然失败"）。
+   */
+  async moderate(action: 'mute' | 'kick', targetId: string): Promise<void> {
+    await this.request({ type: 'moderate', action, targetId }, ['moderate'], 5000)
+    if (action === 'kick') {
+      this.update({ notice: '已将该参与者移出房间' })
+    } else {
+      this.update({ notice: '已强制静音该参与者' })
+    }
+  }
+
   private pushReaction(fromId: string, emoji: string) {
     const item: Reaction = {
       id: crypto.randomUUID(),
@@ -948,6 +988,16 @@ export class RoomClient {
           ? Array.from(new Set([...this.snapshot.hands, id]))
           : this.snapshot.hands.filter((x) => x !== id)
         this.update({ hands })
+        return
+      }
+      case 'force_mute': {
+        // 被主持人强制静音：服务端已经停止转发我的音频，这里同步 UI 状态
+        if (msg.muted) {
+          this.localStream?.getAudioTracks().forEach((t) => (t.enabled = false))
+          this.update({ micEnabled: false, notice: '你已被主持人静音' })
+        } else {
+          this.update({ notice: '主持人已解除静音' })
+        }
         return
       }
       case 'active_speakers': {

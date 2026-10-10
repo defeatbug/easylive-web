@@ -15,6 +15,8 @@ export interface JoinRequest {
    * 不能序列化，所以不会被写进 sessionStorage（刷新后为 undefined，会重新申请）。
    */
   previewStream?: MediaStream | null
+  /** 以主持人身份加入（申请 roomAdmin 权限）。仅演示用：生产应由登录鉴权决定 */
+  asAdmin?: boolean
 }
 
 interface JoinPageProps {
@@ -38,6 +40,7 @@ export function JoinPage({ onJoin }: JoinPageProps) {
   const [camId, setCamId] = useState<string | undefined>()
   const [micOn, setMicOn] = useState(true)
   const [camOn, setCamOn] = useState(true)
+  const [asAdmin, setAsAdmin] = useState(false)
   const [preview, setPreview] = useState<MediaStream | null>(null)
   const [hint, setHint] = useState<string | null>(null)
 
@@ -106,6 +109,7 @@ export function JoinPage({ onJoin }: JoinPageProps) {
       micOn,
       camOn,
       previewStream: preview,
+      asAdmin,
     })
   }
 
@@ -155,6 +159,18 @@ export function JoinPage({ onJoin }: JoinPageProps) {
             disabled={!camOn}
           />
         </div>
+
+        {/* 演示用：申请主持人权限。真正的权限判定在服务端（/token 是否授予 roomAdmin，
+            以及每条 moderate 都重新校验），这个勾选只是"向服务端申请"，生产应由登录系统决定 */}
+        <label className="flex cursor-pointer items-center gap-2 text-xs text-neutral-400">
+          <input
+            type="checkbox"
+            checked={asAdmin}
+            onChange={(e) => setAsAdmin(e.target.checked)}
+            className="h-3.5 w-3.5 accent-[var(--accent)]"
+          />
+          以主持人身份加入（可强制静音 / 移出参与者）
+        </label>
 
         {/* 房间号 / 昵称 */}
         <div className="space-y-2">

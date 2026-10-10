@@ -43,6 +43,7 @@ export default function App() {
         camId: req.camId,
         micOn: req.micOn,
         camOn: req.camOn,
+        asAdmin: req.asAdmin,
       }
       sessionStorage.setItem(SESSION_KEY, JSON.stringify(persistable))
     } catch {
@@ -70,6 +71,7 @@ export default function App() {
       initialMicOn={session.micOn ?? true}
       initialCamOn={session.camOn ?? true}
       previewStream={session.previewStream}
+      asAdmin={session.asAdmin}
       onLeave={leave}
     />
   )

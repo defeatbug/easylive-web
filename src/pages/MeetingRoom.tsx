@@ -16,6 +16,8 @@ interface MeetingRoomProps {
   initialCamOn: boolean
   /** 会前页交接过来的预览流（刷新后自动回会时为 null，会重新申请） */
   previewStream?: MediaStream | null
+  /** 以主持人身份加入（申请 roomAdmin） */
+  asAdmin?: boolean
   onLeave: () => void
 }
 
@@ -53,6 +55,7 @@ export function MeetingRoom({
   initialMicOn,
   initialCamOn,
   previewStream,
+  asAdmin,
   onLeave,
 }: MeetingRoomProps) {
   const { client, snapshot, error } = useRoom(true, roomId, displayName, {
@@ -60,6 +63,7 @@ export function MeetingRoom({
     micOn: initialMicOn,
     camOn: initialCamOn,
     previewStream,
+    asAdmin,
   })
   const { mics, cams } = useDevices()
 
@@ -225,6 +229,18 @@ export function MeetingRoom({
         </div>
       )}
 
+      {snapshot.notice && (
+        <div className="mx-4 mb-2 flex items-center gap-3 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs text-sky-300">
+          <span className="min-w-0 flex-1">{snapshot.notice}</span>
+          <button
+            onClick={() => client?.clearNotice()}
+            className="shrink-0 rounded px-2 py-1 transition hover:bg-white/10"
+          >
+            知道了
+          </button>
+        </div>
+      )}
+
       {error && (
         <div className="mx-4 mb-2 flex items-center gap-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
           <span className="min-w-0 flex-1">{error}</span>
@@ -327,6 +343,8 @@ export function MeetingRoom({
             }}
             handRaised={snapshot.hands.includes(snapshot.self?.id ?? '')}
             dataChannelReady={snapshot.dataChannelReady}
+            canPublish={snapshot.grants?.canPublish ?? true}
+            canPublishData={snapshot.grants?.canPublishData ?? true}
             onToggleHand={() => client?.toggleHand()}
             onReaction={(emoji) => client?.sendReaction(emoji)}
             onLeave={() => {
@@ -347,6 +365,14 @@ export function MeetingRoom({
             hands={snapshot.hands}
             speakers={snapshot.speakers}
             stats={snapshot.stats}
+            isAdmin={snapshot.grants?.roomAdmin ?? false}
+            onModerate={(action, targetId) => {
+              const who = snapshot.participants.find((p) => p.id === targetId)?.name ?? targetId
+              if (action === 'kick' && !window.confirm(`确定把 ${who} 移出房间？`)) return
+              void client?.moderate(action, targetId).catch((e: unknown) => {
+                window.alert(`操作失败：${e instanceof Error ? e.message : String(e)}`)
+              })
+            }}
             onSend={(t) => client?.sendChat(t)}
           />
         )}

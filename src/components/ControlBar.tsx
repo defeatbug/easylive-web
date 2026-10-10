@@ -32,6 +32,10 @@ interface ControlBarProps {
   dataChannelReady: boolean
   onToggleHand: () => void
   onReaction: (emoji: string) => void
+  /** 令牌是否允许发布媒体（无鉴权模式下恒为 true） */
+  canPublish: boolean
+  /** 令牌是否允许发布数据（表情/举手） */
+  canPublishData: boolean
 }
 
 /**
@@ -66,6 +70,8 @@ export function ControlBar({
   dataChannelReady,
   onToggleHand,
   onReaction,
+  canPublish,
+  canPublishData,
 }: ControlBarProps) {
   const [emojiOpen, setEmojiOpen] = useState(false)
 
@@ -94,7 +100,13 @@ export function ControlBar({
         disabled={!camEnabled}
       />
 
-      <PillButton active={screenSharing} onClick={onToggleScreen} title="共享屏幕（s）" label="共享屏幕">
+      <PillButton
+        active={screenSharing}
+        onClick={onToggleScreen}
+        title={canPublish ? '共享屏幕（s）' : '当前令牌无发布权限'}
+        label={canPublish ? '共享屏幕' : '无发布权限'}
+        disabled={!canPublish}
+      >
         <IconScreen />
       </PillButton>
       <PillButton
@@ -111,15 +123,30 @@ export function ControlBar({
       <PillButton
         active={handRaised}
         onClick={onToggleHand}
-        title={dataChannelReady ? (handRaised ? '放下手' : '举手（数据通道上报）') : '数据通道尚未就绪'}
+        title={
+          !canPublishData
+            ? '当前令牌无发布数据权限'
+            : dataChannelReady
+              ? handRaised
+                ? '放下手'
+                : '举手（数据通道上报）'
+              : '数据通道尚未就绪'
+        }
         label={handRaised ? '已举手' : '举手'}
+        disabled={!canPublishData}
       >
         <IconHand raised={handRaised} />
       </PillButton>
 
       {/* 表情：与按钮同一个相对容器，弹层向上展开 */}
       <div className="relative">
-        <PillButton active={emojiOpen} onClick={() => setEmojiOpen((v) => !v)} title="发送表情（走数据通道）" label="表情">
+        <PillButton
+          active={emojiOpen}
+          onClick={() => setEmojiOpen((v) => !v)}
+          title={canPublishData ? '发送表情（走数据通道）' : '当前令牌无发布数据权限'}
+          label="表情"
+          disabled={!canPublishData}
+        >
           <IconSmile />
         </PillButton>
         {emojiOpen && (
@@ -165,20 +192,28 @@ function PillButton({
   onClick,
   title,
   label,
+  disabled,
   children,
 }: {
   active?: boolean
   onClick: () => void
   title: string
   label: string
+  /** 令牌权限不足时置灰（服务端仍会校验，这里只是不让用户白点） */
+  disabled?: boolean
   children: React.ReactNode
 }) {
   return (
     <button
       onClick={onClick}
       title={title}
+      disabled={disabled}
       className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition ${
-        active ? 'bg-[var(--accent)]/20 text-[var(--accent)]' : 'bg-white/8 text-neutral-200 hover:bg-white/12'
+        disabled
+          ? 'cursor-not-allowed bg-white/4 text-neutral-600'
+          : active
+            ? 'bg-[var(--accent)]/20 text-[var(--accent)]'
+            : 'bg-white/8 text-neutral-200 hover:bg-white/12'
       }`}
     >
       <span className="shrink-0">{children}</span>
