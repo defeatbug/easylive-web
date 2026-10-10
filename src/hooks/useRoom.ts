@@ -91,6 +91,10 @@ export function useRoom(active: boolean, roomId: string, displayName: string, jo
           if (!camOn) c.setCamEnabled(false)
         } catch (e) {
           if (!cancelled) setLocalError(e instanceof Error ? e.message : String(e))
+          // 媒体打不开不代表参会能力全废：举手/表情依赖的数据通道建在发布连接上，
+          // 这里补一次不带媒体的协商，让它们照常可用。
+          // 用外层变量：c 是 try 块内的 const，catch 里看不到
+          await client?.ensureDataPlane()
         }
       })()
     }, 0)

@@ -832,19 +832,41 @@ export class RoomClient {
    * 在数据通道上发送。数据面语义是"尽力而为"：
    * 通道没就绪就静默丢弃，绝不能因为一个表情让界面报错。
    */
-  private sendData(msg: DataMessage) {
+  private sendData(msg: DataMessage): boolean {
     const dc = this.pubDC
-    if (!dc || dc.readyState !== 'open') return
+    if (!dc || dc.readyState !== 'open') return false
     try {
       dc.send(JSON.stringify(msg))
+      return true
     } catch (e) {
       console.warn('[RoomClient] 数据通道发送失败', e)
+      return false
+    }
+  }
+
+  /**
+   * 保证发布连接完成协商，即使本端没有任何媒体。
+   *
+   * 为什么需要：数据通道（举手/表情）建在**发布连接**上，而发布连接原本只在
+   * "有本地媒体"时才会协商。于是没有摄像头 / 权限被拒的用户会静默失去这两个功能
+   * （表现为"点了没反应"）。这里补一次只带数据通道的 offer，让数据面独立于媒体建立。
+   */
+  async ensureDataPlane(): Promise<void> {
+    if (!this.pubPC || this.localStream) return
+    try {
+      await this.renegotiatePublish('camera')
+    } catch (e) {
+      console.warn('[RoomClient] 无媒体时协商数据通道失败', e)
     }
   }
 
   /** 发一个表情。本地立即回显（服务端只中继给其他人），避免自己看不到自己的表情。 */
   sendReaction(emoji: string) {
-    this.sendData({ type: 'reaction', emoji })
+    // 表情是瞬时事件，只走数据面；发不出去时明确告知，避免"点了没反应"
+    if (!this.sendData({ type: 'reaction', emoji })) {
+      this.update({ notice: '数据通道尚未就绪，表情未发送（稍后重试或刷新页面）' })
+      return
+    }
     this.pushReaction(this.snapshot.self?.id ?? 'me', emoji)
   }
 
@@ -856,7 +878,13 @@ export class RoomClient {
     const selfId = this.snapshot.self?.id
     if (!selfId) return
     const raised = !this.snapshot.hands.includes(selfId)
-    this.sendData({ type: 'raise_hand', raised })
+
+    // 优先走数据面（低延迟，也顺带验证数据通道可用）；
+    // 数据面不可用时回退信令面——举手是**状态**，状态本来就该走可靠通道。
+    // 两条路在服务端是同一个处理函数，重复送达也是幂等的。
+    if (!this.sendData({ type: 'raise_hand', raised })) {
+      this.send({ type: 'hand_state', raised })
+    }
   }
 
   /** 清掉提示条（用户点"知道了"） */

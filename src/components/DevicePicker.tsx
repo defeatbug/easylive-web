@@ -55,7 +55,10 @@ export function DevicePicker({
   return (
     <div ref={rootRef} className="relative">
       <div className="flex items-stretch overflow-hidden rounded-lg bg-white/8">
+        {/* type="button" 必须显式写：在 <form> 内默认是 type="submit"，
+            会前页把这个选择器放在表单里，点击麦克风/摄像头就会直接提交表单（= 直接入会） */}
         <button
+          type="button"
           onClick={onToggle}
           title={title}
           className={`flex items-center gap-2 py-2 pl-3 pr-2 text-sm font-medium transition hover:bg-white/10 ${
@@ -66,6 +69,7 @@ export function DevicePicker({
           <span className="hidden sm:inline">{label}</span>
         </button>
         <button
+          type="button"
           onClick={() => setOpen((v) => !v)}
           disabled={disabled}
           title="选择设备"
@@ -82,6 +86,7 @@ export function DevicePicker({
           {devices.length === 0 && <p className="px-3 py-2 text-xs text-neutral-400">没有可用设备</p>}
           {devices.map((d) => (
             <button
+              type="button"
               key={d.deviceId}
               onClick={() => {
                 onSelect(d.deviceId)
