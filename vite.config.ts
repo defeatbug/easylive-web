@@ -18,6 +18,7 @@ export default defineConfig({
     proxy: {
       '/ws': { target: 'ws://localhost:8080', ws: true },
       '/token': { target: 'http://localhost:8080', changeOrigin: true },
+      '/ice': { target: 'http://localhost:8080', changeOrigin: true },
       '/graphql': { target: 'http://localhost:8080', changeOrigin: true },
       '/healthz': { target: 'http://localhost:8080', changeOrigin: true },
     },

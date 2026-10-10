@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 import { RoomClient, type RoomSnapshot } from '../lib/RoomClient'
+import { fetchICEServers } from '../lib/ice'
 import { fetchToken } from '../lib/token'
 import { buildConstraints, type DeviceSelection } from '../lib/devices'
 
@@ -71,16 +72,14 @@ export function useRoom(active: boolean, roomId: string, displayName: string, jo
         try {
           // 先申请令牌：服务端 AUTH_MODE=off 时 /token 返回 501，这里拿到 null，
           // 照常以无令牌方式入会（保证本地演示开箱可用）。
-          const token = await fetchToken({
-            roomId,
-            identity: identity ?? displayName,
-            name: displayName,
-            roomAdmin: asAdmin,
-          })
+          const who = identity ?? displayName
+          const token = await fetchToken({ roomId, identity: who, name: displayName, roomAdmin: asAdmin })
+          // ICE 配置与令牌并行取（两者互不依赖），减少入会前的等待
+          const iceServers = await fetchICEServers(who)
           // 关键：await 之后必须重新检查 cancelled，否则 StrictMode 下会留下"僵尸连接"
           if (cancelled) return
 
-          const c = new RoomClient({ roomId, displayName, token, onError: (m) => setLocalError(m) })
+          const c = new RoomClient({ roomId, displayName, token, iceServers, onError: (m) => setLocalError(m) })
           client = c
           setClient(c)
 

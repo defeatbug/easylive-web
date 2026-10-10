@@ -77,6 +77,15 @@ pnpm typecheck   # 只做类型检查
 - 主持人可在「成员」面板对他人执行**强制静音**（服务端停止转发其音频）与**移出房间**；
   被静音者会收到 `force_mute` 并自动更新麦克风状态。
 
+## 生产部署
+
+本仓库自带生产镜像与反代配置：
+
+- `deploy/Dockerfile.web`：Node 构建 → Nginx 提供静态资源并反代 API
+- `deploy/nginx.conf`：HTTPS 终止、WSS 反代（关缓冲 + 长超时）、SPA 回退、安全响应头
+
+完整部署步骤（含安全组端口、证书、coturn 与验收清单）在**后端仓库**的 `deploy/README.md`。
+
 ## 已知未完成项（下一步）
 
 - 业务后端 GraphQL 接口（创建房间 / 房间列表），前端目前用 URL 参数传房间号

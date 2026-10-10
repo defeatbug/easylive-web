@@ -1,0 +1,34 @@
+# 前端生产镜像：Node 构建静态产物 → Nginx 提供服务并反代 API。
+#
+# 为什么用 Nginx 而不是 Vite preview：preview 是开发服务器，不带 TLS、不带 gzip、
+# 也不适合做 WebSocket 反代；生产必须用真正的反代（顺带完成 HTTPS/WSS 终止）。
+FROM node:22-alpine AS builder
+
+WORKDIR /src
+# corepack 让 pnpm 版本由 package.json 的 packageManager 字段决定，
+# 不依赖构建机上装了什么
+RUN corepack enable
+
+# 先拷锁文件与清单，依赖不变时复用缓存层
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+
+COPY . .
+RUN pnpm build
+
+FROM nginx:1.27-alpine
+
+# 生产配置：TLS 终止 + WSS 反代 + SPA 静态资源
+COPY deploy/nginx.conf /etc/nginx/nginx.conf
+
+# Vite 产物
+COPY --from=builder /src/dist /usr/share/nginx/html
+
+# 证书目录由 compose 挂载进来（deploy/certs）
+RUN mkdir -p /etc/nginx/certs /var/www/certbot
+
+EXPOSE 80 443
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget -qO- http://127.0.0.1/healthz-nginx || exit 1
+
+CMD ["nginx", "-g", "daemon off;"]
