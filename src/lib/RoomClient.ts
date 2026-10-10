@@ -659,10 +659,16 @@ export class RoomClient {
       this.pubPC.addTrack(track, stream)
     }
     // 如实反映实际发布出去的轨道（例如摄像头失败时不该显示"摄像头已开"）
+    //
+    // 同时清掉过期的媒体错误：顺利拿到视频轨说明"摄像头不可用"已经不成立了。
+    // 不清的话，重试成功的用户会看到红字错误与正常画面同时存在——
+    // 那比没有提示更糟：他以为摄像头还是坏的（这正是用户报的"摄像头不可用了"）。
+    const hasVideo = stream.getVideoTracks().length > 0
     this.update({
       localStream: stream,
       micEnabled: stream.getAudioTracks().length > 0,
-      camEnabled: stream.getVideoTracks().length > 0,
+      camEnabled: hasVideo,
+      ...(hasVideo ? { error: null } : {}),
     })
     await this.renegotiatePublish('camera')
   }

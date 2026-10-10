@@ -89,6 +89,8 @@ export function useRoom(active: boolean, roomId: string, displayName: string, jo
           await c.publishLocalMedia(buildConstraints(devices, { audio: true, video: true }), previewStream)
           if (!micOn) c.setMicEnabled(false)
           if (!camOn) c.setCamEnabled(false)
+          // 成功走到这里说明媒体已经就绪，之前那次失败的错误提示必须消失
+          if (!cancelled) setLocalError(null)
         } catch (e) {
           if (!cancelled) setLocalError(e instanceof Error ? e.message : String(e))
           // 媒体打不开不代表参会能力全废：举手/表情依赖的数据通道建在发布连接上，
@@ -109,9 +111,33 @@ export function useRoom(active: boolean, roomId: string, displayName: string, jo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, roomId, displayName, devices.micId, devices.camId, micOn, camOn, previewStream, identity, asAdmin])
 
+  /**
+   * 重试打开设备。
+   *
+   * 为什么要有这层包装而不是让界面直接调 client：这个 hook 自己也会用 localError
+   * 记住失败原因，而 client 的重试成功时并不知道要清它——结果就是"重试成功了，
+   * 红字'Permission denied'还挂在那里"。新的一次尝试开始，旧错误就应当立即作废。
+   */
+  const retryMedia = useCallback(async () => {
+    const c = client
+    if (!c) return
+    setLocalError(null)
+    try {
+      await c.retryLocalMedia()
+    } catch (e) {
+      setLocalError(e instanceof Error ? e.message : String(e))
+    }
+  }, [client])
+
+  /** 重连信令（同样先清掉上一次的错误，避免成功后面板仍显示红字） */
+  const retryConnect = useCallback(() => {
+    setLocalError(null)
+    void client?.retryConnect()
+  }, [client])
+
   const subscribe = useCallback((cb: () => void) => (client ? client.subscribe(cb) : () => {}), [client])
   const getSnapshot = useCallback(() => (client ? client.getSnapshot() : EMPTY), [client])
   const snapshot = useSyncExternalStore(subscribe, getSnapshot)
 
-  return { client, snapshot, error: snapshot.error ?? localError }
+  return { client, snapshot, error: snapshot.error ?? localError, retryMedia, retryConnect }
 }

@@ -27,28 +27,18 @@ Vite 已把 `/ws`、`/graphql`、`/healthz` 代理到 `http://localhost:8080`，
 | `src/lib/protocol.ts` | 信令协议类型定义，**必须与 `easylive-api/protocol/protocol.go` 1:1 对齐** |
 | `src/lib/RoomClient.ts` | WebRTC + 信令的唯一持有者（普通 TS 类）：两条 PeerConnection、请求响应匹配、ICE 候选缓存、订阅串行化、指标采集 |
 | `src/hooks/useRoom.ts` | 用 `useSyncExternalStore` 把 `RoomClient` 接到 React，UI 只消费不可变快照 |
-| `src/lib/devices.ts` | 设备枚举与约束拼装；`useDevices()` 监听插拔 |
-| `src/pages/JoinPage.tsx` | **会前页**：实时摄像头预览 + 麦克风/摄像头选择器 + 昵称 + 加入按钮 |
+| `src/pages/JoinPage.tsx` | 入会页（房间号 + 昵称） |
 | `src/pages/MeetingRoom.tsx` | 会议主界面：顶栏 / 视频宫格 / 右侧面板 / 底部控制栏 |
-| `src/components/*` | `VideoTile`（瓦片：名字条/质量柱/全屏）、`ControlBar`（图标+文字胶囊，麦克风与摄像头带设备下拉）、`DevicePicker`（开关与选设备分离）、`SidePanel`（聊天/成员/指标）、`ShareDialog`（二维码邀请） |
+| `src/components/*` | `VideoTile`（视频瓦片）、`ControlBar`（控制栏）、`SidePanel`（聊天/成员/指标） |
 
-## 视觉基调（对齐 LiveKit Meet）
-
-平面深色（`#0e0e11`）+ 单一强调蓝（`--accent`），**刻意不用渐变与毛玻璃**：
-会议界面里视频才是主体，UI 应当退到背景里；而且 `backdrop-filter` 在低端机上是实打实的合成开销。
-控制栏是「图标 + 文字」的胶囊按钮，"离开"用红色**描边**而非实心（破坏性操作不该比静音更抢眼）。
-
-## 四个设计决定（踩过坑才这么写）
+## 三个设计决定（踩过坑才这么写）
 
 1. **WebRTC 状态不进 React state。** React 18+ 的 StrictMode 在开发模式下 effect 会双调用，
    若把 `RTCPeerConnection` 建在 `useEffect` 里就会建两条连接（表现为重复发信令、幽灵参与者）。
    所以 `RoomClient` 独占浏览器 API，React 只读快照。
 2. **ICE 候选要缓存。** 浏览器在 `setRemoteDescription` 之前调用 `addIceCandidate` 会抛错；
    服务端候选往往先于 SDP 到达，因此按 `pub`/`sub` 分别缓存，设置远端描述后再 flush。
-3. **换设备用 `replaceTrack` 热替换，不重协商。** `switchCamera/switchMicrophone` 拿到新轨道后
-   `sender.replaceTrack()` 再停旧轨道：连接不中断、对端无感知，这才是"设置里切设备"应有的行为。
-   注意 MediaStream 要**重建对象**（不是原地改轨），否则 `<video>` 的 `srcObject` 不变、画面不会更新。
-4. **订阅必须串行。** 订阅者连接上服务端是 offerer，并发订阅会在 `have-local-offer` 状态下再创建
+3. **订阅必须串行。** 订阅者连接上服务端是 offerer，并发订阅会在 `have-local-offer` 状态下再创建
    offer 而失败。`RoomClient` 用一条 Promise 队列把订阅串起来。
 
 ## 常用脚本
@@ -60,34 +50,34 @@ pnpm preview     # 预览构建产物
 pnpm typecheck   # 只做类型检查
 ```
 
+## 浏览器回归探针（唯一能测真实浏览器行为的接缝）
+
+类型检查与构建抓不到"点了没反应""红字不消失"这类问题，而用户报过来的 bug 大多是这一类。
+`scripts/ui-probe.mjs` 用**真实 Chrome + 假摄像头**驱动界面，覆盖：
+
+- 会前页点麦克风/摄像头**不会**提交表单（`<button>` 在 `<form>` 内默认是 `submit`）
+- 摄像头开关能真正切换预览显隐
+- 权限被拒 → 授权后点「重试打开设备」：画面恢复，**且过期的错误提示会消失**
+- 会前页关摄像头入会 → 会中能重新打开
+
+```bash
+pnpm add -D playwright-core      # 只需一次；用本机已装的 Chrome，不下载浏览器
+node scripts/ui-probe.mjs        # 默认打 https://localhost:5173 + http://localhost:8080
+# 要换地址：PROBE_URL=... PROBE_API=... CHROME_PATH=... node scripts/ui-probe.mjs
+```
+
+它以退出码表示结果（全绿 0，有失败非 0），适合放进提交前的手工检查。
+如果后端要指向另一套实例，起 dev server 时用 `DSH_API_TARGET=http://host:port` 覆盖代理目标。
+
 ## 局域网 / 手机测试
 
 1. `pnpm dev` 后，用 `ipconfig getifaddr en0` 拿到本机 IP；
 2. 手机访问 `https://<该IP>:5173`，手动信任自签证书；
 3. **后端要显式设置 `SFU_ADVERTISE_IP=<该IP>`**，否则服务端广播的是容器/内网地址，手机连不上媒体面。
 
-## 鉴权与主持人（与后端 auth 配套）
-
-- 入会前先向 `POST /token` 申请令牌（`src/lib/token.ts`）。**拿不到令牌不算错**：
-  服务端 `AUTH_MODE=off` 时该端点返回 501，前端会照常以无令牌方式入会，保证本地演示开箱可用。
-- 令牌权限（`VideoGrant`）由前端解析后**只用于 UI 取舍**（置灰"共享屏幕""举手""表情"、
-  是否显示主持人按钮）。真正的边界在服务端：每条 `publish`/`subscribe`/`chat`/数据面消息都会重新校验。
-- 会前页有「以主持人身份加入」勾选（申请 `roomAdmin`）——**仅用于本地演示**，
-  生产环境这个权限应由登录系统决定，不能由前端申请。
-- 主持人可在「成员」面板对他人执行**强制静音**（服务端停止转发其音频）与**移出房间**；
-  被静音者会收到 `force_mute` 并自动更新麦克风状态。
-
-## 生产部署
-
-本仓库自带生产镜像与反代配置：
-
-- `deploy/Dockerfile.web`：Node 构建 → Nginx 提供静态资源并反代 API
-- `deploy/nginx.conf`：HTTPS 终止、WSS 反代（关缓冲 + 长超时）、SPA 回退、安全响应头
-
-完整部署步骤（含安全组端口、证书、coturn 与验收清单）在**后端仓库**的 `deploy/README.md`。
-
 ## 已知未完成项（下一步）
 
+- 断线重连（当前 WebSocket 断开只更新状态，不自动重连；对应后端 M4）
 - 业务后端 GraphQL 接口（创建房间 / 房间列表），前端目前用 URL 参数传房间号
 - 屏幕共享在 Safari 上受系统限制，建议用 Chrome 演示
 - 多人网格在超过 9 路时的分页/虚拟滚动（实测 20 路浏览器解码会先成为瓶颈）

@@ -58,7 +58,7 @@ export function MeetingRoom({
   asAdmin,
   onLeave,
 }: MeetingRoomProps) {
-  const { client, snapshot, error } = useRoom(true, roomId, displayName, {
+  const { client, snapshot, error, retryMedia, retryConnect } = useRoom(true, roomId, displayName, {
     devices: initialDevices,
     micOn: initialMicOn,
     camOn: initialCamOn,
@@ -246,7 +246,7 @@ export function MeetingRoom({
           <span className="min-w-0 flex-1">{error}</span>
           {snapshot.connection === 'closed' && (
             <button
-              onClick={() => client?.retryConnect()}
+              onClick={retryConnect}
               className="shrink-0 rounded border border-red-400/40 px-2 py-1 font-medium transition hover:bg-red-500/20"
             >
               重新连接
@@ -254,7 +254,7 @@ export function MeetingRoom({
           )}
           {!snapshot.localStream && (
             <button
-              onClick={() => void client?.retryLocalMedia()}
+              onClick={() => void retryMedia()}
               className="shrink-0 rounded border border-red-400/40 px-2 py-1 font-medium transition hover:bg-red-500/20"
             >
               重试打开设备
