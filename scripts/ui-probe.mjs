@@ -191,6 +191,52 @@ console.log('\n=== C. 关摄像头入会，会中打开 ===')
   await browser.close()
 }
 
+// ---------- D. 双人：远端画面必须真的在播（本次遗漏的测试） ----------
+//
+// 为什么必须有这一段：之前的浏览器探针**只测单人**（本地预览 + 本地瓦片），
+// 于是"转发出去的包在 RTP 层被对端静默丢弃"这类问题完全测不到——
+// 真实症状是"别人看不到我的摄像头/屏幕共享/麦克风"，而服务端与信令看起来一切正常。
+console.log('\n=== D. 双人远端画面 ===')
+{
+  const room = 'probe-pair-' + Date.now()
+  const launchPair = async (name) => {
+    const { browser, page } = await launch(['--use-fake-ui-for-media-stream'], ['camera', 'microphone'])
+    await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' })
+    await page.waitForSelector('form', { timeout: 20000 })
+    const inputs = await page.$$('form input[type="text"], form input:not([type])')
+    await inputs[0].fill(room)
+    await inputs[1].fill(name)
+    await page.waitForTimeout(2000)
+    await page.click('form button[type=submit]')
+    return { browser, page }
+  }
+
+  const first = await launchPair('探针甲')
+  await first.page.waitForTimeout(5000)
+  const second = await launchPair('探针乙')
+  await second.page.waitForTimeout(15000)
+
+  // 远端瓦片 = 页面上第二个 <video>（第一个是本地）；用 readyState 与尺寸判断是否真在播
+  const remotePlaying = async (page) =>
+    page.evaluate(() => {
+      const vids = [...document.querySelectorAll('video')]
+      const remote = vids.find((v) => !v.closest('[data-local-tile]')) ?? vids[vids.length - 1]
+      return { count: vids.length, w: remote?.videoWidth ?? 0, readyState: remote?.readyState ?? 0 }
+    })
+
+  const a1 = await remotePlaying(first.page)
+  await first.page.waitForTimeout(4000)
+  const a2 = await remotePlaying(first.page)
+  check('甲 能看到 乙 的画面（远端瓦片在播）', a2.w > 0 && a2.readyState >= 2, `w=${a2.w} readyState=${a2.readyState}`)
+  check('远端画面持续在播（不是只播了开头一小段就冻结）', a2.readyState >= 2 && a1.count === a2.count)
+
+  const b = await remotePlaying(second.page)
+  check('乙 能看到 甲 的画面（远端瓦片在播）', b.w > 0 && b.readyState >= 2, `w=${b.w} readyState=${b.readyState}`)
+
+  await first.browser.close()
+  await second.browser.close()
+}
+
 const failed = results.filter((r) => !r.ok)
 console.log(`\n=== 结果：${results.length - failed.length}/${results.length} 通过 ===`)
 for (const f of failed) console.log(`  ❌ ${f.name}${f.detail ? ` — ${f.detail}` : ''}`)

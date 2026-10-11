@@ -286,6 +286,7 @@ export class RoomClient {
       if (t.publisherId !== joined.participantId) this.enqueueSubscribe(t.id)
     }
     this.startStatsPolling()
+    this.exposeDebugHooks()
   }
 
   /**
@@ -592,6 +593,54 @@ export class RoomClient {
       this.update({ remoteStreams: { ...this.snapshot.remoteStreams, [trackId]: stream } })
     }
     this.subPC = sub
+  }
+
+  /**
+   * 开发模式下把两条连接的原始 getStats 挂到 window，供浏览器探针排查
+   * "远端画面黑屏/收不到媒体"这类问题（生产构建里 import.meta.env.DEV 为 false，
+   * 这段会被摇树掉，不进入产物）。
+   *
+   * 存在的理由：只有它能把"RTP 到了但解不出帧（关键帧/编解码）"和
+   * "RTP 根本没到（ICE/转发）"分开——这两类的修法完全不同。
+   */
+  private exposeDebugHooks(): void {
+    if (!import.meta.env?.DEV) return
+    const w = window as unknown as Record<string, unknown>
+    w.__easyliveDebugPCs = async () => {
+      const dump = async (pc: RTCPeerConnection | null) => {
+        if (!pc) return null
+        const rows: Record<string, unknown>[] = []
+        const report = await pc.getStats()
+        report.forEach((r) => {
+          const v = r as unknown as Record<string, unknown>
+          if (v.type === 'inbound-rtp' || v.type === 'outbound-rtp') {
+            rows.push({
+              type: v.type, kind: v.kind, bytesReceived: v.bytesReceived, packetsReceived: v.packetsReceived,
+              framesReceived: v.framesReceived, framesDecoded: v.framesDecoded, freezeCount: v.freezeCount,
+              bytesSent: v.bytesSent, packetsSent: v.packetsSent, framesEncoded: v.framesEncoded,
+            })
+          } else if (v.type === 'candidate-pair' && v.nominated) {
+            rows.push({ type: v.type, state: v.state, nominated: v.nominated, currentRoundTripTime: v.currentRoundTripTime })
+          } else if (v.type === 'transport') {
+            rows.push({ type: v.type, dtlsState: v.dtlsState, bytesReceived: v.bytesReceived })
+          }
+        })
+        return { connectionState: pc.connectionState, iceConnectionState: pc.iceConnectionState, iceGatheringState: pc.iceGatheringState, rows }
+      }
+      return { pub: await dump(this.pubPC), sub: await dump(this.subPC) }
+    }
+    // 快照要转成可序列化的摘要：直接返回会带 MediaStream 对象，探针读不到内容
+    w.__easyliveDebugSnapshot = () => ({
+      self: this.snapshot.self?.id ?? null,
+      participants: this.snapshot.participants.map((p) => ({ id: p.id, name: p.name, state: p.state })),
+      tracks: this.snapshot.tracks.map((t) => ({ id: t.id, publisherId: t.publisherId, kind: t.kind, source: t.source, muted: t.muted })),
+      remoteStreamKeys: Object.keys(this.snapshot.remoteStreams),
+      remoteStreams: Object.entries(this.snapshot.remoteStreams).map(([tid, st]) => ({
+        tid, tracks: st.getTracks().map((tr) => `${tr.kind}:${tr.id}:${tr.readyState}:enabled=${tr.enabled}:muted=${tr.muted}`),
+      })),
+      localTracks: this.localStream ? this.localStream.getTracks().map((tr) => `${tr.kind}:${tr.readyState}`) : [],
+      stats: this.snapshot.stats,
+    })
   }
 
   // ---------- 发布本地媒体 ----------
