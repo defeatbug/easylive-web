@@ -136,6 +136,16 @@ function clearResumeToken(roomId: string) {
   }
 }
 
+/**
+ * 取出 SDP 里**最后一个** a=mid:（服务端每次订阅只在末尾追加一个 m-line）。
+ * 用来把即将到来的 ontrack 精确对应到我们请求的 trackId。
+ */
+function lastMidFromSDP(sdp: string): string | null {
+  const matches = [...sdp.matchAll(/^a=mid:(.+)$/gm)]
+  const last = matches[matches.length - 1]
+  return last ? last[1].trim() : null
+}
+
 function wsURLFromLocation(): string {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   return `${proto}://${location.host}/ws`
@@ -165,6 +175,14 @@ export class RoomClient {
    * 订阅是串行的，所以 ontrack 与 subscribe 请求严格一一对应，FIFO 即可精确配对。
    */
   private pendingTrackIds: string[] = []
+  /**
+   * 远端轨道登记表：mid → trackId。
+   *
+   * 为什么不能靠 FIFO 队列：重协商时浏览器可能对**已存在的轨道**再次触发 ontrack，
+   * 于是队列被多消耗一次、后面的轨道全部错位——表现就是"能听到声音、看不到画面"
+   * （视频瓦片绑到了音频流上）。mid 是每条 m-line 的唯一标识，按它匹配不会错位。
+   */
+  private pendingByMid = new Map<string, string>()
   /**
    * 自己屏幕共享轨道的服务端 trackId。
    * 结束共享时要靠它发 unpublish —— 否则服务端会一直留着这条轨道，
@@ -523,6 +541,7 @@ export class RoomClient {
     this.subPC = null
     this.pendingCandidates = { pub: [], sub: [] }
     this.pendingTrackIds = []
+    this.pendingByMid.clear()
     this.subQueue = Promise.resolve()
     this.myScreenTrackId = null
 
@@ -583,13 +602,33 @@ export class RoomClient {
       if (e.candidate) this.sendCandidate('sub', e.candidate.toJSON())
     }
     sub.ontrack = (e) => {
-      const trackId = this.pendingTrackIds.shift()
+      // 1) 首选：按 mid 精确匹配（重协商不会错位）
+      const mid = e.transceiver?.mid ?? ''
+      let trackId = mid ? this.pendingByMid.get(mid) : undefined
+      if (trackId) this.pendingByMid.delete(mid)
+
+      // 2) 退路：按类型在"还没有流的远端轨道"里找一条（快照里就有 kind，不需要猜）
       if (!trackId) {
-        console.warn('[RoomClient] 收到未登记的远端轨道，忽略', e.track.kind, e.streams[0]?.id)
+        const fallback = this.snapshot.tracks.find(
+          (t) =>
+            t.kind === e.track.kind &&
+            t.publisherId !== this.snapshot.self?.id &&
+            !this.snapshot.remoteStreams[t.id],
+        )
+        trackId = fallback?.id
+      }
+      // 3) 最后的退路：队列（旧行为）
+      if (!trackId) trackId = this.pendingTrackIds.shift()
+      if (!trackId) {
+        console.warn('[RoomClient] 收到未登记的远端轨道，忽略', e.track.kind, mid)
         return
       }
-      const stream = e.streams[0] ?? new MediaStream([e.track])
-      // 同一个发布者的麦克风+摄像头可能来自同一个 MediaStream，这里按 trackId 分别持有即可
+
+      // 关键：把轨道显式并入流。
+      // e.streams[0] 可能只含音频（同一发布者的音频/视频共用 stream id 时尤其如此），
+      // 那样视频瓦片就会"有声音没画面"。这里保证流里确实有这条轨道。
+      const stream = e.streams[0] ?? new MediaStream()
+      if (!stream.getTracks().some((t) => t.id === e.track.id)) stream.addTrack(e.track)
       this.update({ remoteStreams: { ...this.snapshot.remoteStreams, [trackId]: stream } })
     }
     this.subPC = sub
@@ -799,13 +838,14 @@ export class RoomClient {
     if (!pc) return
     if (this.snapshot.remoteStreams[trackId]) return
 
-    // 先登记，随后 ontrack 会按 FIFO 取走它
-    this.pendingTrackIds.push(trackId)
     const offer = await this.request({ type: 'subscribe', trackId }, ['subscribe_offer'], 15000)
-    if (!offer.sdp) {
-      this.pendingTrackIds.pop()
-      throw new Error('subscribe_offer 缺少 sdp')
-    }
+    if (!offer.sdp) throw new Error('subscribe_offer 缺少 sdp')
+
+    // 必须在 setRemoteDescription **之前**登记：ontrack 是随应用远端描述一起触发的。
+    // 服务端每次只在末尾追加一个 m-line，所以最后一个 a=mid: 就是这次新增的那条。
+    const mid = lastMidFromSDP(offer.sdp)
+    if (mid) this.pendingByMid.set(mid, trackId)
+    else this.pendingTrackIds.push(trackId) // 解析不出 mid 时退回队列
     await pc.setRemoteDescription({ type: 'offer', sdp: offer.sdp })
     await this.flushCandidates('sub')
     const answer = await pc.createAnswer()

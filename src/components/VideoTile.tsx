@@ -59,7 +59,22 @@ export function VideoTile({
     const el = videoRef.current
     if (!el) return
     if (el.srcObject !== stream) el.srcObject = stream
-    if (stream) void el.play().catch(() => {})
+    if (stream) {
+      // 播放失败不能静默吞掉：那会让远端瓦片永远空白、且没有任何提示
+      // （典型原因：自动播放策略拦下了带声音的媒体）。
+      // 这里重试一次，并在 canplay 时再试一次；仍然失败就记日志便于排查。
+      const tryPlay = () => {
+        el.play().catch((err) => {
+          console.warn('[VideoTile] 播放被拒绝，等待用户交互后重试', err)
+          const once = () => {
+            void el.play().catch(() => {})
+            document.removeEventListener('click', once)
+          }
+          document.addEventListener('click', once, { once: true })
+        })
+      }
+      tryPlay()
+    }
   }, [stream])
 
   const hasVideo = !!stream && stream.getVideoTracks().length > 0
