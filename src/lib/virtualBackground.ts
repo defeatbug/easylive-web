@@ -55,8 +55,11 @@ function maskToCanvas(maskCanvas: HTMLCanvasElement, data: Uint8Array, w: number
   const img = ctx.createImageData(w, h)
   const px = img.data
   for (let i = 0; i < w * h; i++) {
-    // 模型给出的取值可能是 0/1（类别）或 0/255（已映射），统一成"非 0 即人"
-    const person = data[i] > 0
+    // 极性是**实测**定的，不是照模型卡猜的：
+    // 最初按"非 0 即人"实现，真人摄像头测出来是"人像被虚拟化、背景反而保留"，
+    // 说明这张 categoryMask 里 **0 才是人**。所以这里取 === 0。
+    // 以后再动这段，请务必用真人摄像头确认一次：背景应模糊、人应清晰。
+    const person = data[i] === 0
     const o = i * 4
     px[o] = 255
     px[o + 1] = 255

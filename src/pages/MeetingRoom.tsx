@@ -200,7 +200,7 @@ export function MeetingRoom({
     <div className="theme-meeting flex h-full flex-col bg-[var(--bg)]">
       {/* 顶部信息栏：左=会议号（可复制）+ 在线人数 + 状态徽标；右=网络质量 + 实时指标。
           对齐腾讯会议客户端：信息全部收在一条 48px 的栏里，把纵向空间留给画面。 */}
-      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-[var(--line)] bg-[var(--surface)] px-4">
+      <header className="relative z-20 flex h-12 shrink-0 items-center gap-2 border-b border-[var(--line)] bg-[var(--surface)] px-4">
         <span className="text-sm font-medium text-[var(--text)]">{roomId}</span>
         <button
           type="button"
@@ -246,7 +246,7 @@ export function MeetingRoom({
       </header>
 
       {snapshot.connection === 'reconnecting' && (
-        <div className="mx-4 mb-2 flex items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+        <div className="relative z-20 mx-4 mb-2 flex shrink-0 items-center gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
           <span className="h-2 w-2 animate-pulse rounded-full bg-amber-400" />
           <span className="min-w-0 flex-1">
             信令连接已断开，正在自动重连（第 {snapshot.reconnectAttempt} 次）… 画面保持最后一帧，恢复后不会中断
@@ -255,7 +255,7 @@ export function MeetingRoom({
       )}
 
       {snapshot.notice && (
-        <div className="mx-4 mb-2 flex items-center gap-3 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs text-sky-300">
+        <div className="relative z-20 mx-4 mb-2 flex shrink-0 items-center gap-3 rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-xs text-sky-300">
           <span className="min-w-0 flex-1">{snapshot.notice}</span>
           <button
             onClick={() => client?.clearNotice()}
@@ -267,7 +267,7 @@ export function MeetingRoom({
       )}
 
       {error && (
-        <div className="mx-4 mb-2 flex items-center gap-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+        <div className="relative z-20 mx-4 mb-2 flex shrink-0 items-center gap-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
           <span className="min-w-0 flex-1">{error}</span>
           {snapshot.connection === 'closed' && (
             <button
@@ -289,7 +289,7 @@ export function MeetingRoom({
       )}
 
       <div className="flex min-h-0 flex-1">
-        <main className="relative flex min-h-0 flex-1 flex-col">
+        <main className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden">
           {/* 表情浮层：绝对定位、不参与排版、不拦截鼠标 */}
           {snapshot.reactions.length > 0 && (
             <div className="pointer-events-none absolute bottom-28 left-4 z-10 flex flex-col-reverse gap-2">

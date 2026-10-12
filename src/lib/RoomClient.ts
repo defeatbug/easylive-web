@@ -928,7 +928,9 @@ export class RoomClient {
     // 关摄像头时先收掉虚拟背景：处理管线会一直往 SFU 推最后一帧，
     // 否则"关了摄像头别人还能看到我"——这正是虚拟背景最容易踩的坑。
     if (!enabled && this.snapshot.virtualBackground !== 'off') void this.setVirtualBackground('off')
-    this.localStream?.getVideoTracks().forEach((t) => (t.enabled = enabled))
+    // 开启虚拟背景时流里放的是画布轨，真正代表"摄像头开关"的是 vbCameraTrack
+    const camTrack = this.vbCameraTrack ?? this.localStream?.getVideoTracks()[0]
+    if (camTrack) camTrack.enabled = enabled
     this.update({ camEnabled: enabled })
     const track = this.snapshot.tracks.find((t) => t.publisherId === this.snapshot.self?.id && t.source !== 'screen')
     if (track) this.send({ type: 'mute', trackId: track.id, muted: !enabled })
@@ -962,11 +964,7 @@ export class RoomClient {
         } catch (e) {
           this.update({ notice: `恢复摄像头失败：${e instanceof Error ? e.message : String(e)}` })
         }
-        const stream = this.localStream
-        if (stream) {
-          stream.getVideoTracks().forEach((t) => stream.removeTrack(t))
-          stream.addTrack(cam)
-        }
+        this.swapLocalVideoTrack(cam)
       }
       vb?.stop()
       this.update({ virtualBackground: 'off', notice: vb ? '已关闭虚拟背景' : null })
@@ -985,11 +983,7 @@ export class RoomClient {
       this.vb = handle
       this.vbCameraTrack = camera
 
-      const stream = this.localStream
-      if (stream) {
-        stream.getVideoTracks().forEach((t) => stream.removeTrack(t))
-        stream.addTrack(handle.track)
-      }
+      this.swapLocalVideoTrack(handle.track)
       await sender.replaceTrack(handle.track)
       this.update({
         virtualBackground: mode,
@@ -1004,6 +998,22 @@ export class RoomClient {
         notice: `虚拟背景启用失败：${e instanceof Error ? e.message : String(e)}（摄像头画面不受影响）`,
       })
     }
+  }
+
+  /**
+   * 把本地预览流里的视频轨换成另一条（虚拟背景开关用）。
+   *
+   * 为什么必须**换掉整个 MediaStream 对象**，而不是就地在原对象上 removeTrack/addTrack：
+   * <video> 的 srcObject 只在"对象变了"时才重新绑定；就地增删轨时 React 侧看到的
+   * 还是同一个对象 → 不会重新赋 srcObject → 播放器继续显示那条已被 stop 的旧轨
+   * = **关掉特效后画面一直黑**（真人实测踩到的就是这个）。
+   */
+  private swapLocalVideoTrack(track: MediaStreamTrack) {
+    const old = this.localStream
+    const audio = old ? old.getAudioTracks() : []
+    const next = new MediaStream([...audio, track])
+    this.localStream = next
+    this.update({ localStream: next })
   }
 
   sendChat(text: string) {
