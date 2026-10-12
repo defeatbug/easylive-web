@@ -8,6 +8,7 @@
  *
  * 所以：本类独占所有浏览器 API，对外只暴露不可变快照 + 订阅（配合 useSyncExternalStore）。
  */
+import { startVirtualBackground, type VirtualBackgroundHandle, type VirtualBackgroundMode } from './virtualBackground'
 import type {
   Candidate,
   ChatMessage,
@@ -66,6 +67,10 @@ export interface RoomSnapshot {
   error: string | null
   /** 已尝试的自动重连次数（0 = 未在重连）；UI 用它显示"第 N 次重连" */
   reconnectAttempt: number
+  /** 端侧虚拟背景当前模式（off/blur/color） */
+  virtualBackground: VirtualBackgroundMode
+  /** 正在加载模型/切换中（UI 用来禁用按钮并显示"处理中"） */
+  virtualBackgroundBusy: boolean
 }
 
 export interface RoomClientOptions {
@@ -160,6 +165,9 @@ export class RoomClient {
   private subPC: RTCPeerConnection | null = null
   private localStream: MediaStream | null = null
   private screenStream: MediaStream | null = null
+  /** 虚拟背景句柄与"被替换掉的原始摄像头轨"（关掉特效时要换回来） */
+  private vb: VirtualBackgroundHandle | null = null
+  private vbCameraTrack: MediaStreamTrack | null = null
 
   /** 请求-响应匹配：key 是请求的 id */
   private pending = new Map<string, { types: MsgType[]; resolve: (m: Message) => void; reject: (e: Error) => void; timer: number }>()
@@ -240,6 +248,8 @@ export class RoomClient {
       stats: null,
       error: null,
       reconnectAttempt: 0,
+      virtualBackground: 'off',
+      virtualBackgroundBusy: false,
     }
   }
 
@@ -678,6 +688,10 @@ export class RoomClient {
         tid, tracks: st.getTracks().map((tr) => `${tr.kind}:${tr.id}:${tr.readyState}:enabled=${tr.enabled}:muted=${tr.muted}`),
       })),
       localTracks: this.localStream ? this.localStream.getTracks().map((tr) => `${tr.kind}:${tr.readyState}`) : [],
+      // 端侧 AI 状态：给自动化探针一个可读的出口（真实用户界面不依赖它）
+      virtualBackground: this.snapshot.virtualBackground,
+      virtualBackgroundBusy: this.snapshot.virtualBackgroundBusy,
+      localVideoFromCanvas: this.localStream?.getVideoTracks()[0]?.label?.includes('canvas') ?? false,
       stats: this.snapshot.stats,
     })
   }
@@ -911,10 +925,85 @@ export class RoomClient {
   }
 
   setCamEnabled(enabled: boolean) {
+    // 关摄像头时先收掉虚拟背景：处理管线会一直往 SFU 推最后一帧，
+    // 否则"关了摄像头别人还能看到我"——这正是虚拟背景最容易踩的坑。
+    if (!enabled && this.snapshot.virtualBackground !== 'off') void this.setVirtualBackground('off')
     this.localStream?.getVideoTracks().forEach((t) => (t.enabled = enabled))
     this.update({ camEnabled: enabled })
     const track = this.snapshot.tracks.find((t) => t.publisherId === this.snapshot.self?.id && t.source !== 'screen')
     if (track) this.send({ type: 'mute', trackId: track.id, muted: !enabled })
+  }
+
+  /**
+   * 开关端侧虚拟背景。
+   *
+   * 关键点：换轨走 `sender.replaceTrack()`，**m-line 与 SSRC 都不变**，
+   * 所以 SFU 侧完全无感，也不需要任何信令/协议改动——服务端看到的还是同一条轨道。
+   * 同时把 localStream 里的视频轨也换成处理后的轨，保证"自己看到的 = 别人看到的"。
+   */
+  async setVirtualBackground(mode: VirtualBackgroundMode) {
+    if (this.snapshot.virtualBackgroundBusy) return
+    const sender = this.pubPC?.getSenders().find((s) => s.track?.kind === 'video')
+    if (!sender) {
+      this.update({ notice: '当前没有可处理的视频轨（先发布摄像头）' })
+      return
+    }
+    const camera = this.localStream?.getVideoTracks()[0] ?? null
+
+    // ---- 关闭 ----
+    if (mode === 'off') {
+      const vb = this.vb
+      const cam = this.vbCameraTrack
+      this.vb = null
+      this.vbCameraTrack = null
+      if (cam) {
+        try {
+          await sender.replaceTrack(cam)
+        } catch (e) {
+          this.update({ notice: `恢复摄像头失败：${e instanceof Error ? e.message : String(e)}` })
+        }
+        const stream = this.localStream
+        if (stream) {
+          stream.getVideoTracks().forEach((t) => stream.removeTrack(t))
+          stream.addTrack(cam)
+        }
+      }
+      vb?.stop()
+      this.update({ virtualBackground: 'off', notice: vb ? '已关闭虚拟背景' : null })
+      return
+    }
+
+    // ---- 开启 ----
+    if (!camera) {
+      this.update({ notice: '请先打开摄像头再启用虚拟背景' })
+      return
+    }
+    this.update({ virtualBackgroundBusy: true })
+    try {
+      const handle = await startVirtualBackground(camera, mode)
+      this.vb?.stop()
+      this.vb = handle
+      this.vbCameraTrack = camera
+
+      const stream = this.localStream
+      if (stream) {
+        stream.getVideoTracks().forEach((t) => stream.removeTrack(t))
+        stream.addTrack(handle.track)
+      }
+      await sender.replaceTrack(handle.track)
+      this.update({
+        virtualBackground: mode,
+        virtualBackgroundBusy: false,
+        notice: mode === 'blur' ? '虚拟背景已开启：背景虚化（端侧处理，画面不出本机）' : '虚拟背景已开启：纯色背景',
+      })
+    } catch (e) {
+      this.update({
+        virtualBackground: 'off',
+        virtualBackgroundBusy: false,
+        // 明确告诉用户"原画面没受影响"，否则会以为摄像头坏了
+        notice: `虚拟背景启用失败：${e instanceof Error ? e.message : String(e)}（摄像头画面不受影响）`,
+      })
+    }
   }
 
   sendChat(text: string) {

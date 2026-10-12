@@ -370,6 +370,9 @@ export function MeetingRoom({
             dataChannelReady={snapshot.dataChannelReady}
             canPublish={snapshot.grants?.canPublish ?? true}
             canPublishData={snapshot.grants?.canPublishData ?? true}
+            virtualBackground={snapshot.virtualBackground}
+            vbBusy={snapshot.virtualBackgroundBusy}
+            onVirtualBackground={(m) => void client?.setVirtualBackground(m)}
             onToggleHand={() => client?.toggleHand()}
             onReaction={(emoji) => client?.sendReaction(emoji)}
             onLeave={() => {

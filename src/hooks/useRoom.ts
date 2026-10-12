@@ -22,6 +22,8 @@ const EMPTY: RoomSnapshot = {
   screenStream: null,
   micEnabled: true,
   camEnabled: true,
+  virtualBackground: 'off',
+  virtualBackgroundBusy: false,
   stats: null,
   error: null,
   reconnectAttempt: 0,

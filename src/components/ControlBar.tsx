@@ -16,7 +16,9 @@ import {
   IconSmile,
   IconStats,
 } from './Icons'
+import { IconSparkle } from './Icons'
 import type { DeviceOption } from '../lib/devices'
+import type { VirtualBackgroundMode } from '../lib/virtualBackground'
 
 /** 表情面板里可用的表情（写在前面的是最常用的） */
 const REACTION_EMOJIS = ['👍', '👏', '❤️', '😂', '🎉', '🤔']
@@ -52,6 +54,11 @@ interface ControlBarProps {
   canPublish: boolean
   /** 令牌是否允许发布数据（表情/举手） */
   canPublishData: boolean
+  /** 端侧虚拟背景当前模式 */
+  virtualBackground: VirtualBackgroundMode
+  /** 模型加载/切换中 */
+  vbBusy: boolean
+  onVirtualBackground: (mode: VirtualBackgroundMode) => void
 }
 
 /**
@@ -92,9 +99,13 @@ export function ControlBar({
   onReaction,
   canPublish,
   canPublishData,
+  virtualBackground,
+  vbBusy,
+  onVirtualBackground,
 }: ControlBarProps) {
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
+  const [fxOpen, setFxOpen] = useState(false)
 
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 flex justify-center px-4 pb-4">
@@ -162,6 +173,48 @@ export function ControlBar({
         >
           <IconHand size={20} raised={handRaised} />
         </ToolButton>
+
+        {/* 端侧 AI：虚拟背景（人像分割在本机跑，画面不上传） */}
+        <div className="relative">
+          <ToolButton
+            active={virtualBackground !== 'off'}
+            onClick={() => setFxOpen((v) => !v)}
+            title={canPublish ? '虚拟背景（端侧人像分割）' : '当前令牌无发布权限'}
+            label={vbBusy ? '处理中' : virtualBackground === 'off' ? '特效' : '已开启'}
+            disabled={!canPublish || vbBusy}
+          >
+            <span className={vbBusy ? 'tm-pulse' : undefined}>
+              <IconSparkle size={20} />
+            </span>
+          </ToolButton>
+          {fxOpen && (
+            <div className="tm-menu absolute bottom-full left-1/2 z-20 mb-2 w-56 -translate-x-1/2">
+              <p className="px-2.5 pt-1.5 pb-1 text-[11px] text-[var(--text-mute)]">
+                端侧处理 · 画面不出本机
+              </p>
+              {(
+                [
+                  ['off', '关闭'],
+                  ['blur', '背景虚化'],
+                  ['color', '纯色背景'],
+                ] as const
+              ).map(([m, label]) => (
+                <button
+                  key={m}
+                  type="button"
+                  className={`tm-menu-item ${virtualBackground === m ? 'tm-menu-item-active' : ''}`}
+                  onClick={() => {
+                    onVirtualBackground(m)
+                    setFxOpen(false)
+                  }}
+                >
+                  {label}
+                  {virtualBackground === m && <span className="ml-auto">✓</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* 表情：向上展开的浮层 */}
         <div className="relative">
