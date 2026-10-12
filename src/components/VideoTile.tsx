@@ -137,7 +137,7 @@ export function VideoTile({
           onClick={onToggleSidebar}
           title={sidebarOpen ? '收起左侧访客（还原布局）' : '访客卡片竖排到左侧'}
           className={`absolute right-2 top-2 rounded bg-black/50 p-1.5 opacity-0 transition hover:bg-black/70 group-hover:opacity-100 ${
-            sidebarOpen ? 'text-[var(--accent)] opacity-100' : 'text-white/80'
+            sidebarOpen ? 'text-[var(--brand)] opacity-100' : 'text-white/80'
           }`}
         >
           <SidebarIcon open={!!sidebarOpen} />

@@ -76,7 +76,7 @@ export function ShareDialog({ roomId, onClose }: ShareDialogProps) {
           />
           <button
             onClick={copy}
-            className="shrink-0 rounded-md bg-[var(--accent)] px-2.5 py-1.5 text-xs font-medium text-white transition hover:brightness-110"
+            className="shrink-0 rounded-md bg-[var(--brand)] px-2.5 py-1.5 text-xs font-medium text-white transition hover:brightness-110"
           >
             复制
           </button>

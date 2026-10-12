@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ControlBar } from '../components/ControlBar'
+import { IconCheck, IconCopy } from '../components/Icons'
 import { ShareDialog } from '../components/ShareDialog'
 import { SidePanel } from '../components/SidePanel'
 import { VideoTile } from '../components/VideoTile'
@@ -72,6 +73,8 @@ export function MeetingRoom({
   const [view, setView] = useState<ViewMode>('grid')
   const [activeKey, setActiveKey] = useState<string | null>(null)
   const [shareOpen, setShareOpen] = useState(false)
+  /** 复制会议号后的短暂反馈（1.5s 后自动消失，不弹窗打断） */
+  const [copied, setCopied] = useState(false)
   const [micId, setMicId] = useState<string | undefined>(initialDevices.micId)
   const [camId, setCamId] = useState<string | undefined>(initialDevices.camId)
 
@@ -194,12 +197,34 @@ export function MeetingRoom({
     .filter((n) => n !== '')
 
   return (
-    <div className="flex h-full flex-col bg-[var(--bg)]">
-      <header className="flex items-center gap-3 px-4 py-2.5">
-        <span className="text-sm font-medium text-neutral-200">{roomId}</span>
+    <div className="theme-meeting flex h-full flex-col bg-[var(--bg)]">
+      {/* 顶部信息栏：左=会议号（可复制）+ 在线人数 + 状态徽标；右=网络质量 + 实时指标。
+          对齐腾讯会议客户端：信息全部收在一条 48px 的栏里，把纵向空间留给画面。 */}
+      <header className="flex h-12 shrink-0 items-center gap-2 border-b border-[var(--line)] bg-[var(--surface)] px-4">
+        <span className="text-sm font-medium text-[var(--text)]">{roomId}</span>
+        <button
+          type="button"
+          onClick={() => {
+            void navigator.clipboard?.writeText(roomId).then(
+              () => {
+                setCopied(true)
+                window.setTimeout(() => setCopied(false), 1500)
+              },
+              () => {},
+            )
+          }}
+          title="复制会议号"
+          className="rounded-md p-1 text-[var(--text-dim)] transition hover:bg-[var(--surface-3)] hover:text-[var(--text)]"
+        >
+          {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
+        </button>
         <ConnectionPill connection={snapshot.connection} />
-        <span className="text-xs text-neutral-500">{snapshot.participants.length} 人在线</span>
-        {hasScreen && <span className="rounded bg-sky-500/15 px-1.5 py-0.5 text-[11px] text-sky-300">正在共享屏幕</span>}
+        <span className="text-xs text-[var(--text-mute)]">{snapshot.participants.length} 人在线</span>
+        {hasScreen && (
+          <span className="rounded bg-[var(--brand-tint)] px-1.5 py-0.5 text-[11px] text-[var(--brand)]">
+            正在共享屏幕
+          </span>
+        )}
         {speakerNames.length > 0 && (
           <span className="flex items-center gap-1.5 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[11px] text-emerald-300">
             <span className="flex h-3 items-end gap-[2px]">
@@ -282,7 +307,7 @@ export function MeetingRoom({
             </div>
           )}
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-2">
+          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-24">
             {tiles.length === 0 ? (
               <p className="py-24 text-center text-sm text-neutral-500">等待其他人加入…</p>
             ) : view === 'sidebar' && activeTile ? (
@@ -408,8 +433,12 @@ function GridView({ tiles }: { tiles: Tile[] }) {
       : tiles.length <= 4
         ? 'grid-cols-1 sm:grid-cols-2'
         : 'grid-cols-1 sm:grid-cols-2 xl:grid-cols-3'
+  const single = tiles.length === 1
   return (
-    <div className={`grid gap-3 ${cols}`}>
+    // h-full + auto-rows-fr：让宫格铺满整个舞台高度。
+    // 原来只有宽度约束，单人时瓦片按 16:9 撑开，下方会空出一大片——腾讯会议里
+    // 单人是"铺满舞台"的观感，多人时行高平分剩余高度。
+    <div className={`grid h-full min-h-0 gap-3 ${cols} ${single ? '' : 'auto-rows-fr'}`}>
       {tiles.map((t) => (
         <VideoTile
           key={t.key}
@@ -419,6 +448,7 @@ function GridView({ tiles }: { tiles: Tile[] }) {
           muted={t.muted}
           badge={t.badge}
           speaking={t.speaking}
+          fit={single ? 'stage' : undefined}
         />
       ))}
     </div>
@@ -589,7 +619,7 @@ function SidebarLayout({
             key={t.key}
             onClick={() => onSelect(t.key)}
             className={`shrink-0 overflow-hidden rounded-lg text-left transition ${
-              t.key === active.key ? 'ring-2 ring-[var(--accent)]' : 'opacity-60 hover:opacity-100'
+              t.key === active.key ? 'ring-2 ring-[var(--brand)]' : 'opacity-60 hover:opacity-100'
             }`}
             title={t.label}
           >

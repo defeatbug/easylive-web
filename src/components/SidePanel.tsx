@@ -140,7 +140,7 @@ function ChatList({
               </span>
               <div
                 className={`max-w-[85%] rounded-lg px-3 py-1.5 text-sm leading-relaxed ${
-                  mine ? 'bg-[var(--accent)] text-white' : 'bg-[var(--surface-2)] text-neutral-100'
+                  mine ? 'bg-[var(--brand)] text-white' : 'bg-[var(--surface-2)] text-neutral-100'
                 }`}
               >
                 {m.text}
@@ -165,11 +165,11 @@ function ChatList({
           }}
           placeholder="输入消息…"
           maxLength={2000}
-          className="min-w-0 flex-1 rounded-lg bg-[var(--surface-2)] px-3 py-2 text-sm outline-none placeholder:text-neutral-500 focus:ring-1 focus:ring-[var(--accent)]"
+          className="min-w-0 flex-1 rounded-lg bg-[var(--surface-2)] px-3 py-2 text-sm outline-none placeholder:text-neutral-500 focus:ring-1 focus:ring-[var(--brand)]"
         />
         <button
           onClick={submit}
-          className="rounded-lg px-3 py-2 text-sm font-medium text-[var(--accent)] transition hover:bg-white/10"
+          className="rounded-lg px-3 py-2 text-sm font-medium text-[var(--brand)] transition hover:bg-white/10"
         >
           发送
         </button>
@@ -214,7 +214,7 @@ function PeopleList({
               {hands.includes(p.id) && <span className="mr-1">✋</span>}
               {p.name}
               {order.has(p.id) && <span className="ml-1 text-[10px] text-emerald-400">说话中</span>}
-              {p.id === selfId && <span className="ml-1 text-xs text-[var(--accent)]">（我）</span>}
+              {p.id === selfId && <span className="ml-1 text-xs text-[var(--brand)]">（我）</span>}
             </p>
             <p className="truncate text-[10px] text-neutral-500">{p.identity ?? p.id}</p>
           </div>

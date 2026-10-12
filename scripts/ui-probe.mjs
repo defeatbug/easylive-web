@@ -130,7 +130,13 @@ console.log('\n=== B. 权限被拒后重试打开设备 ===')
   await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' })
   await fillJoinForm(page, 'probe-denied', '探针B')
   await page.waitForTimeout(2000)
-  const s0 = await page.evaluate(() => ({ hint: document.querySelector('form p')?.textContent ?? '' }))
+  const s0 = await page.evaluate(() => ({
+    // 用显式钩子定位会前提示，不再依赖"表单里第一个 p"这种隐式约定
+    hint:
+      document.querySelector('[data-testid="prejoin-hint"]')?.textContent ??
+      document.querySelector('form p')?.textContent ??
+      '',
+  }))
   check('无权限时会前页给出提示', s0.hint.includes('无法访问'), s0.hint.trim().slice(0, 60))
 
   await page.click('form button[type=submit]')
