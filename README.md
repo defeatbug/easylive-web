@@ -1,20 +1,12 @@
 # easylive-web（前端）
 
-React 19 + TypeScript + Vite 8 + TailwindCSS 4。**不使用 devcontainer**：前端依赖 Node 生态，直接在宿主机跑最省事。
+React 19 + TypeScript + Vite 8 + TailwindCSS 4
 
 ## 快速开始
 
 ```bash
 pnpm install
 pnpm dev        # https://localhost:5173（自签证书，浏览器需点"继续访问"）
-```
-
-同时把后端跑起来（另开一个终端）：
-
-```bash
-cd ../easylive-api
-cp .env.example .env        # 首次
-go run .                    # 监听 :8080，媒体 UDP :7881
 ```
 
 Vite 已把 `/ws`、`/graphql`、`/healthz` 代理到 `http://localhost:8080`，所以**前端只有一个源**：
