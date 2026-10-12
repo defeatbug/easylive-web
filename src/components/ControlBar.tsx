@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { DevicePicker } from './DevicePicker'
 import {
   IconCam,
@@ -18,6 +18,7 @@ import {
 } from './Icons'
 import { IconSparkle } from './Icons'
 import type { DeviceOption } from '../lib/devices'
+import { usePopover } from '../lib/popover'
 import type { VirtualBackgroundMode } from '../lib/virtualBackground'
 
 /** 表情面板里可用的表情（写在前面的是最常用的） */
@@ -106,6 +107,13 @@ export function ControlBar({
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
   const [fxOpen, setFxOpen] = useState(false)
+  // 三个浮层共用同一套互斥逻辑：打开任一都会关掉其它（真人实测：以前会叠在一起）
+  const emojiRef = useRef<HTMLDivElement>(null)
+  const moreRef = useRef<HTMLDivElement>(null)
+  const fxRef = useRef<HTMLDivElement>(null)
+  usePopover(emojiOpen, setEmojiOpen, emojiRef)
+  usePopover(moreOpen, setMoreOpen, moreRef)
+  usePopover(fxOpen, setFxOpen, fxRef)
 
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 flex justify-center px-4 pb-4">
@@ -175,7 +183,7 @@ export function ControlBar({
         </ToolButton>
 
         {/* 端侧 AI：虚拟背景（人像分割在本机跑，画面不上传） */}
-        <div className="relative">
+        <div className="relative" ref={fxRef}>
           <ToolButton
             active={virtualBackground !== 'off'}
             onClick={() => setFxOpen((v) => !v)}
@@ -196,7 +204,6 @@ export function ControlBar({
                 [
                   ['off', '关闭'],
                   ['blur', '背景虚化'],
-                  ['color', '纯色背景'],
                 ] as const
               ).map(([m, label]) => (
                 <button
@@ -217,7 +224,7 @@ export function ControlBar({
         </div>
 
         {/* 表情：向上展开的浮层 */}
-        <div className="relative">
+        <div className="relative" ref={emojiRef}>
           <ToolButton
             active={emojiOpen}
             onClick={() => setEmojiOpen((v) => !v)}
@@ -228,7 +235,7 @@ export function ControlBar({
             <IconSmile size={20} />
           </ToolButton>
           {emojiOpen && (
-            <div className="absolute bottom-full left-1/2 z-20 mb-2 flex -translate-x-1/2 gap-1 rounded-xl border border-[var(--line)] bg-[var(--surface-2)] p-2 shadow-[var(--shadow-pop)]">
+            <div className="tm-menu absolute bottom-full left-1/2 z-20 mb-2 flex -translate-x-1/2 gap-1">
               {REACTION_EMOJIS.map((e) => (
                 <button
                   key={e}
@@ -248,7 +255,7 @@ export function ControlBar({
         </div>
 
         {/* 更多：邀请 / 布局 / 指标 */}
-        <div className="relative">
+        <div className="relative" ref={moreRef}>
           <ToolButton
             active={moreOpen}
             onClick={() => setMoreOpen((v) => !v)}

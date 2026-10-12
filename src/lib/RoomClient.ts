@@ -978,7 +978,7 @@ export class RoomClient {
     }
     this.update({ virtualBackgroundBusy: true })
     try {
-      const handle = await startVirtualBackground(camera, mode)
+      const handle = await startVirtualBackground(camera)
       this.vb?.stop()
       this.vb = handle
       this.vbCameraTrack = camera
@@ -988,7 +988,7 @@ export class RoomClient {
       this.update({
         virtualBackground: mode,
         virtualBackgroundBusy: false,
-        notice: mode === 'blur' ? '虚拟背景已开启：背景虚化（端侧处理，画面不出本机）' : '虚拟背景已开启：纯色背景',
+        notice: '虚拟背景已开启：背景虚化（端侧处理，画面不出本机）',
       })
     } catch (e) {
       this.update({

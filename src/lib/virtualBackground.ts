@@ -12,7 +12,11 @@ import { FilesetResolver, ImageSegmenter } from '@mediapipe/tasks-vision'
  *  4. 换轨用 `sender.replaceTrack()`——m-line 与 SSRC 都不变，SFU 侧完全无感，
  *     不需要任何信令改动。
  */
-export type VirtualBackgroundMode = 'off' | 'blur' | 'color'
+/**
+ * 只保留"背景虚化"。曾经有过"纯色背景"，实测效果不好（抠像边缘在半透明/纯色底上更显眼），
+ * 已按使用者要求移除——少一个选项，也少一条会出问题的路径。
+ */
+export type VirtualBackgroundMode = 'off' | 'blur'
 
 export interface VirtualBackgroundHandle {
   /** 处理后的视频轨（喂给 RTCRtpSender 与本地预览） */
@@ -70,12 +74,9 @@ function maskToCanvas(maskCanvas: HTMLCanvasElement, data: Uint8Array, w: number
 }
 
 /**
- * 启动虚拟背景。source 必须是**摄像头的视频轨**（屏幕共享不做人像分割）。
+ * 启动背景虚化。source 必须是**摄像头的视频轨**（屏幕共享不做人像分割）。
  */
-export async function startVirtualBackground(
-  source: MediaStreamTrack,
-  mode: Exclude<VirtualBackgroundMode, 'off'>,
-): Promise<VirtualBackgroundHandle> {
+export async function startVirtualBackground(source: MediaStreamTrack): Promise<VirtualBackgroundHandle> {
   const segmenter = await loadSegmenter()
 
   const video = document.createElement('video')
@@ -117,17 +118,12 @@ export async function startVirtualBackground(
   let hasMask = false
 
   const compose = () => {
-    // ---- 背景层 ----
-    if (mode === 'blur') {
-      outCtx.save()
-      outCtx.filter = 'blur(16px)'
-      // 放大一点再画，避免模糊后边缘出现半透明缝
-      outCtx.drawImage(video, -8, -8, w + 16, h + 16)
-      outCtx.restore()
-    } else {
-      outCtx.fillStyle = '#12161c'
-      outCtx.fillRect(0, 0, w, h)
-    }
+    // ---- 背景层：整帧模糊 ----
+    outCtx.save()
+    outCtx.filter = 'blur(16px)'
+    // 放大一点再画，避免模糊后边缘出现半透明缝
+    outCtx.drawImage(video, -8, -8, w + 16, h + 16)
+    outCtx.restore()
 
     // ---- 人像层：原图 + 遮罩 destination-in ----
     if (hasMask) {

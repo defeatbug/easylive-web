@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { IconChevron } from './Icons'
+import { usePopover } from '../lib/popover'
 import type { DeviceOption } from '../lib/devices'
 
 interface DevicePickerProps {
@@ -45,22 +46,8 @@ export function DevicePicker({
 }: DevicePickerProps) {
   const [open, setOpen] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const onDocClick = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false)
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
-    }
-    document.addEventListener('mousedown', onDocClick)
-    document.addEventListener('keydown', onKey)
-    return () => {
-      document.removeEventListener('mousedown', onDocClick)
-      document.removeEventListener('keydown', onKey)
-    }
-  }, [open])
+  // 与工具栏的其它浮层共享互斥：打开设备列表会关掉"更多/表情/特效"
+  usePopover(open, setOpen, rootRef)
 
   const isTool = variant === 'tool'
 

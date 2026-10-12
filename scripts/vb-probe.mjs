@@ -60,6 +60,27 @@ check('没有出现失败提示', state.hasError === false)
 check('没有 4xx/5xx 资源请求', badStatus.length === 0, badStatus.slice(0,3).join(' | ') || '无')
 await p.screenshot({ path: '/tmp/uishot/6-vb-on.png' })
 
+// ---- 弹层互斥回归：点开另一个浮层时，前一个必须自动关闭 ----
+const countMenus = () => p.$$eval('.tm-menu', (els) => els.filter((e) => e.getBoundingClientRect().height > 0).length)
+const moreBtn = p.locator('button', { hasText: '更多' }).first()
+const emojiBtn = p.locator('button', { hasText: '表情' }).first()
+await emojiBtn.click(); await p.waitForTimeout(350)
+const afterEmoji = await countMenus()
+await moreBtn.click(); await p.waitForTimeout(350)
+const afterMore = await countMenus()
+check('打开表情浮层时只有一个浮层', afterEmoji === 1, `可见浮层=${afterEmoji}`)
+check('再点"更多"时表情浮层已自动关闭（不再互相覆盖）', afterMore === 1, `可见浮层=${afterMore}`)
+// 点空白处应关闭
+await p.mouse.click(700, 400); await p.waitForTimeout(350)
+const afterOutside = await countMenus()
+check('点击空白处浮层关闭', afterOutside === 0, `可见浮层=${afterOutside}`)
+// 特效浮层里不应该再有"纯色背景"
+const fxBtn2 = p.locator('button', { hasText: /特效|已开启/ }).first()
+await fxBtn2.click(); await p.waitForTimeout(350)
+const fxItems = await p.$$eval('.tm-menu', (els) => els.map((e) => e.innerText).join('|'))
+check('特效菜单只剩"关闭/背景虚化"（纯色已移除）', fxItems.includes('背景虚化') && !fxItems.includes('纯色'), fxItems.replace(/\s+/g, ' ').slice(0, 40))
+await p.mouse.click(700, 400); await p.waitForTimeout(250)
+
 // 关掉特效，确认能恢复
 const fxOn = p.locator('button', { hasText: '已开启' }).first()
 if (await fxOn.count()) {
