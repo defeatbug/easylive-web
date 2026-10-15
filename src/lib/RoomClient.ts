@@ -1120,6 +1120,16 @@ export class RoomClient {
    * 广播到达后按 seq 收敛，体感无延迟。
    */
   sendWhiteboardOp(op: WhiteboardOp): void {
+    // 仅开发环境的调试钩子：把提交延后 N 毫秒，用来复现"上一笔还没确认就画下一笔"
+    // 这条真实网络下必现、而回环(<50ms 回声)下永远触发不到的路径。
+    // 生产构建里 import.meta.env.DEV 为 false，这段会被摇掉。
+    if (import.meta.env.DEV) {
+      const delay = (window as unknown as { __easyliveWhiteboardDelay?: number }).__easyliveWhiteboardDelay
+      if (typeof delay === 'number' && delay > 0) {
+        window.setTimeout(() => this.send({ type: 'whiteboard', op }), delay)
+        return
+      }
+    }
     this.send({ type: 'whiteboard', op })
   }
 

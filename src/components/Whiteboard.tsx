@@ -48,7 +48,16 @@ export function Whiteboard({ ops, selfId, nameOf, onOp, onClose }: WhiteboardPro
    * 等兜底超时把它清掉时笔画又**消失**了——真人反馈的正是这个现象。
    */
   const liveRef = useRef<WhiteboardStroke | null>(null)
-  const pendingRef = useRef<WhiteboardStroke | null>(null)
+  /**
+   * 已抬手、等广播回来的笔画**队列**。
+   *
+   * 为什么必须是队列而不是单值：上一笔的回声还没到就开始画下一笔时（真实网络下必然发生），
+   * 单值会被新的一笔**覆盖**，那一笔既不在本地待确认里、也还没进 ops——于是永久消失。
+   * 用户看到的正是"画第二笔时第一笔不见了"。
+   */
+  const pendingRef = useRef<WhiteboardStroke[]>([])
+  /** 已确认的"我方笔迹"数：用它精确地把队列里的待确认项出队 */
+  const confirmedSelfRef = useRef(0)
   const drawRef = useRef<{ tool: WhiteboardTool; color: string; width: number; start: [number, number] | null }>({
     tool: 'pen',
     color: COLORS[0],
@@ -141,8 +150,8 @@ export function Whiteboard({ ops, selfId, nameOf, onOp, onClose }: WhiteboardPro
     ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.clearRect(0, 0, canvas.width, canvas.height)
     ctx.drawImage(off, 0, 0)
-    // 先画"已抬手待确认"的那一笔，再画"正在画"的这一笔
-    if (pendingRef.current) paintStroke(ctx, pendingRef.current, canvas.width, canvas.height)
+    // 顺序：全部待确认的笔画 → 正在画的那一笔
+    for (const p of pendingRef.current) paintStroke(ctx, p, canvas.width, canvas.height)
     if (liveRef.current) paintStroke(ctx, liveRef.current, canvas.width, canvas.height)
   }
 
@@ -165,12 +174,23 @@ export function Whiteboard({ ops, selfId, nameOf, onOp, onClose }: WhiteboardPro
     return () => ro.disconnect()
   }, [ops])
 
-  // 服务端广播回来（ops 变长）后，清掉"待确认"的那一笔——它的副本已经在 ops 里了。
-  // 注意**不能**动 liveRef：那是用户此刻正按住画的笔，清掉会让正在画的一笔断掉。
+  // ops 变化时：重画已提交层，并把"已被服务端确认的我方笔迹"从待确认队列里出队。
+  //
+  // 用"我方笔迹数量"而不是"ops 长度"来判断：别人的笔迹也会让 ops 变长，
+  // 按长度出队会错杀我们自己的待确认项。注意**不能**动 liveRef——那是用户正按住画的笔。
   useEffect(() => {
-    pendingRef.current = null
+    repaintCommitted()
+    const selfStrokes = ops.filter((o) => o.kind === 'stroke' && (!selfId || o.by === selfId)).length
+    const delta = selfStrokes - confirmedSelfRef.current
+    confirmedSelfRef.current = selfStrokes
+    if (delta < 0) {
+      // 清空/撤销：本地待确认的一并作废（服务端已经不认它们了）
+      pendingRef.current = []
+    } else {
+      for (let i = 0; i < delta && pendingRef.current.length > 0; i++) pendingRef.current.shift()
+    }
     repaint()
-  }, [ops.length])
+  }, [ops, selfId])
 
   // 到达服务端上限时提前告知：否则用户会看到"画上去又被服务端拒绝"，很困惑。
   // 上限与服务端 protocol.MaxWhiteboardOps 保持一致（600）。
@@ -224,13 +244,14 @@ export function Whiteboard({ ops, selfId, nameOf, onOp, onClose }: WhiteboardPro
       repaint()
       return
     }
-    pendingRef.current = live
+    pendingRef.current.push(live)
     onOp({ kind: 'stroke', stroke: live })
-    // 兜底：万一服务端没广播回来（被限速或白板已满），2.5s 后清掉"待确认"的那一笔，
+    // 兜底：万一服务端没广播回来（被限速或白板已满），2.5s 后把**这一笔**从队列里摘掉，
     // 否则它会永远留在画面上、看起来像"画上去了但其实没提交成功"。
     window.setTimeout(() => {
-      if (pendingRef.current === live) {
-        pendingRef.current = null
+      const i = pendingRef.current.indexOf(live)
+      if (i >= 0) {
+        pendingRef.current.splice(i, 1)
         repaint()
       }
     }, 2500)
@@ -331,7 +352,7 @@ export function Whiteboard({ ops, selfId, nameOf, onOp, onClose }: WhiteboardPro
             onPointerCancel={finishStroke}
             onPointerLeave={finishStroke}
           />
-          {ops.length === 0 && !liveRef.current && !pendingRef.current && (
+          {ops.length === 0 && !liveRef.current && pendingRef.current.length === 0 && (
             <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-neutral-400">
               在这里画点什么——所有人都会实时看到
             </p>
