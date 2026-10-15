@@ -18,3 +18,6 @@ dist-ssr/
 *.swp
 *~
 *.log
+
+# 本机 pnpm store 配置（含绝对路径，绝不提交）
+pnpm-workspace.yaml

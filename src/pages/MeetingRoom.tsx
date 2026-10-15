@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ControlBar } from '../components/ControlBar'
 import { IconCheck, IconCopy } from '../components/Icons'
 import { RecordingsPanel } from '../components/RecordingsPanel'
+import { closeAllDetachedWindows } from '../lib/multiWindow'
 import { ShareDialog } from '../components/ShareDialog'
 import { SidePanel } from '../components/SidePanel'
 import { VideoTile } from '../components/VideoTile'
@@ -78,6 +79,9 @@ export function MeetingRoom({
   const [copied, setCopied] = useState(false)
   /** 录制列表面板（仅主持人可打开） */
   const [recordingsOpen, setRecordingsOpen] = useState(false)
+
+  // 离开会中页时关掉所有"独立窗口"：否则会留下一堆播放着已结束流的空窗口
+  useEffect(() => () => closeAllDetachedWindows(), [])
   const [micId, setMicId] = useState<string | undefined>(initialDevices.micId)
   const [camId, setCamId] = useState<string | undefined>(initialDevices.camId)
 
@@ -401,6 +405,7 @@ export function MeetingRoom({
             onToggleHand={() => client?.toggleHand()}
             onReaction={(emoji) => client?.sendReaction(emoji)}
             onLeave={() => {
+              closeAllDetachedWindows()
               client?.leave()
               onLeave()
             }}

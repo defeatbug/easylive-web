@@ -51,12 +51,12 @@ export function RecordingsPanel({ onLoad, onClose }: RecordingsPanelProps) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      className="tm-anim-fade fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
       onClick={onClose}
       role="presentation"
     >
       <div
-        className="theme-meeting flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-[var(--shadow-pop)]"
+        className="tm-anim-pop theme-meeting flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-[var(--shadow-pop)]"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="flex shrink-0 items-center gap-3 border-b border-[var(--line)] px-4 py-3">

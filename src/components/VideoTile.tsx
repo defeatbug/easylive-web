@@ -1,5 +1,6 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { openDetachedWindow, toggleFullscreen as requestFullscreen, togglePictureInPicture } from '../lib/multiWindow'
 
 type Quality = 'excellent' | 'good' | 'fair' | 'poor' | 'unknown'
 
@@ -15,6 +16,8 @@ interface VideoTileProps {
   /** 网络质量（右下角柱子），不传则不显示 */
   quality?: Quality
   badge?: ReactNode
+  /** 独立窗口去重用；不传则用 label */
+  tileId?: string
   /**
    * 主画面右上角的"布局切换"按钮：把访客卡片摆到左侧竖排（再点还原）。
    * 不传则不显示该按钮。
@@ -47,6 +50,7 @@ export function VideoTile({
   screen,
   quality,
   badge,
+  tileId,
   onToggleSidebar,
   sidebarOpen,
   fit = 'tile',
@@ -78,16 +82,19 @@ export function VideoTile({
   }, [stream])
 
   const hasVideo = !!stream && stream.getVideoTracks().length > 0
-
-  const toggleFullscreen = () => {
-    if (document.fullscreenElement) void document.exitFullscreen()
-    else void wrapRef.current?.requestFullscreen()
+  // 独立窗口的去重键：优先用稳定的外部 id，退化到标签
+  const tileKey = tileId ?? label
+  /** 多窗口操作的瞬时提示（例如弹窗被拦截）；1.6s 后自动消失，不打断会议 */
+  const [hint, setHint] = useState<string | null>(null)
+  const showHint = (msg: string) => {
+    setHint(msg)
+    window.setTimeout(() => setHint(null), 1600)
   }
 
   return (
     <div
       ref={wrapRef}
-      className={`group relative w-full overflow-hidden rounded-lg ${
+      className={`group tm-anim-tile relative w-full overflow-hidden rounded-lg ${
         fit === 'stage' ? 'h-full bg-black' : 'aspect-video bg-[var(--surface)]'
       } ${speaking ? 'ring-2 ring-emerald-400' : ''}`}
     >
@@ -97,7 +104,7 @@ export function VideoTile({
           autoPlay
           playsInline
           muted
-          onDoubleClick={toggleFullscreen}
+          onDoubleClick={() => void requestFullscreen(wrapRef.current)}
           title="双击全屏"
           className={`h-full w-full bg-black ${mirrored ? '-scale-x-100' : ''} ${
             // 舞台模式一律 contain（宁可留黑边也不裁画面）；宫格里摄像头用 cover 填满、屏幕共享用 contain
@@ -128,8 +135,45 @@ export function VideoTile({
         {badge}
       </div>
 
+      {hint && (
+        <div className="tm-anim-fade pointer-events-none absolute left-1/2 top-2 -translate-x-1/2 rounded-md bg-black/75 px-2.5 py-1 text-[11px] text-white shadow-lg">
+          {hint}
+        </div>
+      )}
+
       {/* 右下角网络质量柱 */}
       {quality && <QualityBars quality={quality} />}
+
+      {/* 右上角多窗口控件（悬停出现）：三个能力都来自浏览器原生 API——
+          画中画浮动小窗、独立窗口（把这一路画面弹到单独窗口，可拖到副屏）、全屏。 */}
+      {hasVideo && stream && (
+        <div className="absolute right-2 top-2 flex gap-1 opacity-0 transition group-hover:opacity-100">
+          <TileAction
+            title="画中画（浮动小窗）"
+            onClick={() => {
+              const el = videoRef.current
+              if (!el) return
+              void togglePictureInPicture(el).then((r) => {
+                if (r === 'unsupported') showHint('当前浏览器不支持画中画（Chrome/Safari 可用）')
+              })
+            }}
+          >
+            <PipIcon />
+          </TileAction>
+          <TileAction
+            title="独立窗口显示（可拖到副屏；关掉那个窗口即恢复）"
+            onClick={() => {
+              const r = openDetachedWindow(stream, label, tileKey)
+              if (!r.ok) showHint(r.reason ?? '无法打开独立窗口')
+            }}
+          >
+            <DetachIcon />
+          </TileAction>
+          <TileAction title="全屏（双击画面同效）" onClick={() => void requestFullscreen(wrapRef.current)}>
+            <ExpandIcon />
+          </TileAction>
+        </div>
+      )}
 
       {/* 右上角：切换"左侧访客栏"布局（悬停才出现，不干扰画面） */}
       {onToggleSidebar && (
@@ -192,3 +236,60 @@ function SidebarIcon({ open }: { open: boolean }) {
     </svg>
   )
 }
+
+/** 瓦片右上角的小控件：统一尺寸与悬停反馈。 */
+function TileAction({
+  title,
+  onClick,
+  children,
+}: {
+  title: string
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={(e) => {
+        e.stopPropagation()
+        onClick()
+      }}
+      // 阻止双击穿透到瓦片的"双击全屏"（否则点两下小按钮会顺带切全屏）
+      onDoubleClick={(e) => e.stopPropagation()}
+      className="rounded bg-black/55 p-1.5 text-white/85 transition hover:bg-black/75 hover:text-white"
+    >
+      {children}
+    </button>
+  )
+}
+
+const tileStroke = {
+  fill: 'none',
+  stroke: 'currentColor',
+  strokeWidth: 1.8,
+  strokeLinecap: 'round' as const,
+  strokeLinejoin: 'round' as const,
+}
+
+const PipIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" {...tileStroke}>
+    <rect x="3" y="4" width="18" height="14" rx="2" />
+    <rect x="12" y="11" width="7" height="5" rx="1" fill="currentColor" stroke="none" />
+    <path d="M8 21h8" />
+  </svg>
+)
+
+const DetachIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" {...tileStroke}>
+    <rect x="3" y="5" width="12" height="9" rx="1.5" />
+    <path d="M10 19h4M12 14v5" />
+    <path d="M18 4h3v3M21 4l-4 4" />
+  </svg>
+)
+
+const ExpandIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" {...tileStroke}>
+    <path d="M4 9V4h5M20 15v5h-5M20 9V4h-5M4 15v5h5" />
+  </svg>
+)

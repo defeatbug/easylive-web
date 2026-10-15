@@ -276,6 +276,7 @@ body {
 
 /* 滚动的右侧面板 */
 .tm-panel {
+  animation: tm-panel-in 0.18s cubic-bezier(0.2, 0.8, 0.2, 1) both;
   background: var(--surface);
   border-left: 1px solid var(--line);
 }
@@ -377,6 +378,7 @@ body {
 
 /* 设备下拉浮层 */
 .tm-menu {
+  animation: tm-pop-in 0.16s cubic-bezier(0.2, 0.8, 0.2, 1) both;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -446,6 +448,56 @@ body {
 
 .reaction-float {
   animation: reaction-float 3s ease-out forwards;
+}
+
+/* ------------------------------------------------------------------
+   动效：只服务于"状态变化被看见"——面板从哪来、卡片何时出现、操作有没有生效。
+   时长 120–200ms、位移不超过 12px：会议界面里视频才是主体，动效不能抢注意力。
+   全部尊重 prefers-reduced-motion（系统开了"减少动态效果"就整组关掉），
+   这不是可选项：会中频繁动画对前庭敏感的人是实打实的干扰。
+   ------------------------------------------------------------------ */
+@keyframes tm-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes tm-pop-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes tm-panel-in {
+  from { opacity: 0; transform: translateX(14px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes tm-tile-in {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+
+.tm-anim-fade { animation: tm-fade-in 0.16s ease-out both; }
+.tm-anim-pop { animation: tm-pop-in 0.16s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.tm-anim-panel { animation: tm-panel-in 0.18s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.tm-anim-tile { animation: tm-tile-in 0.2s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  /* 注意：动效有两处来源——.tm-anim-* 工具类，以及直接写在 .tm-menu / .tm-panel
+     这类组件类里的 animation。**两处都要覆盖**，否则"减少动态效果"只关掉一半
+     （实测正是这样：弹层仍在动）。 */
+  .tm-anim-fade,
+  .tm-anim-pop,
+  .tm-anim-panel,
+  .tm-anim-tile,
+  .tm-menu,
+  .tm-panel,
+  .reaction-float,
+  .tm-pulse {
+    animation: none !important;
+  }
+  .tm-menu,
+  .tm-tool,
+  .tm-btn,
+  .tm-picker-main {
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* 会中顶部信息栏的"正在讲话"脉冲，以及录制红点 */
