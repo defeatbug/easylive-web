@@ -228,6 +228,16 @@ body {
   background: var(--brand-tint);
 }
 /* 关闭态（静音/关摄像头）用红色语义，和腾讯会议一致 */
+/* 录制中：红色语义（与"关闭态"共用红色家族，但更醒目，因为它是持续状态） */
+.tm-tool-recording {
+  color: #ff5c5c;
+  background: rgba(229, 72, 77, 0.14);
+}
+.tm-tool-recording:hover:not(:disabled) {
+  color: #ff7a7a;
+  background: rgba(229, 72, 77, 0.2);
+}
+
 .tm-tool-off {
   color: var(--danger);
 }

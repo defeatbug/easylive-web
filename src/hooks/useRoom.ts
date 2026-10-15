@@ -24,6 +24,7 @@ const EMPTY: RoomSnapshot = {
   camEnabled: true,
   virtualBackground: 'off',
   virtualBackgroundBusy: false,
+  recording: { active: false },
   stats: null,
   error: null,
   reconnectAttempt: 0,

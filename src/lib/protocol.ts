@@ -19,6 +19,7 @@ export type MsgType =
   | 'chat'
   | 'ping'
   | 'moderate' // 主持人操作：mute | kick（需要 roomAdmin）
+  | 'record' // 录制开关：start | stop（需要 roomAdmin）
   // 服务端 -> 客户端
   | 'joined'
   | 'participant_state'
@@ -33,6 +34,7 @@ export type MsgType =
   | 'hand_state'
   | 'force_mute'
   | 'chat_message'
+  | 'recording_state' // 服务端广播录制状态（全员可见的"录制中"红点）
   | 'pong'
   | 'error'
 
@@ -84,7 +86,11 @@ export interface TrackInfo {
   muted: boolean
 }
 
+import type { RecordingState } from './recordings'
+
 export interface RoomState {
+  /** 当前是否正在录制（入会快照携带，中途进来的人也能看到红点） */
+  recording?: RecordingState
   roomId: string
   participants: PeerInfo[]
   tracks: TrackInfo[]
@@ -174,6 +180,9 @@ export interface Message {
   state?: ParticipantState
   participant?: PeerInfo
   room?: RoomState
+  recording?: RecordingState
+  /** 服务端实际生效的权限（joined 下发；无鉴权模式为全权限 devGrants） */
+  grants?: VideoGrant
   track?: TrackInfo
   message?: ChatMessage
   speakers?: SpeakerInfo[]

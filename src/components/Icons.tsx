@@ -87,6 +87,13 @@ export const IconSmile = (p: IconProps) => (
   </Svg>
 )
 
+export const IconRecord = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="8.5" />
+    <circle cx="12" cy="12" r="3.5" fill="currentColor" stroke="none" />
+  </Svg>
+)
+
 export const IconMore = (p: IconProps) => (
   <Svg {...p}>
     <circle cx="5.5" cy="12" r="1.4" />

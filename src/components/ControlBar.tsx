@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { DevicePicker } from './DevicePicker'
 import {
   IconCam,
+  IconRecord,
   IconChat,
   IconFullscreen,
   IconGrid,
@@ -60,6 +61,13 @@ interface ControlBarProps {
   /** 模型加载/切换中 */
   vbBusy: boolean
   onVirtualBackground: (mode: VirtualBackgroundMode) => void
+  /** 当前是否正在录制（全员可见的红点由顶部信息栏负责，这里只管开关） */
+  recordingActive: boolean
+  /** 是否有录制权限（roomAdmin）。没有权限时按钮不出现——服务端仍会独立校验 */
+  canRecord: boolean
+  onToggleRecording: () => void
+  /** 打开录制列表 */
+  onOpenRecordings: () => void
 }
 
 /**
@@ -103,6 +111,10 @@ export function ControlBar({
   virtualBackground,
   vbBusy,
   onVirtualBackground,
+  recordingActive,
+  canRecord,
+  onToggleRecording,
+  onOpenRecordings,
 }: ControlBarProps) {
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
@@ -181,6 +193,22 @@ export function ControlBar({
         >
           <IconHand size={20} raised={handRaised} />
         </ToolButton>
+
+        {/* 录制：仅主持人可见。未开启录制能力时服务端会返回明确错误，按钮不显示。
+            红点状态在顶部信息栏，全员可见——"有人在录我"这件事不该只有主持人知道。 */}
+        {canRecord && (
+          <button
+            type="button"
+            onClick={onToggleRecording}
+            title={recordingActive ? '停止录制' : '开始录制（转发即录制，零转码落盘）'}
+            className={`tm-tool ${recordingActive ? 'tm-tool-recording' : ''}`}
+          >
+            <span className={recordingActive ? 'tm-pulse' : undefined}>
+              <IconRecord size={20} />
+            </span>
+            <span>{recordingActive ? '录制中' : '录制'}</span>
+          </button>
+        )}
 
         {/* 端侧 AI：虚拟背景（人像分割在本机跑，画面不上传） */}
         <div className="relative" ref={fxRef}>
@@ -310,6 +338,19 @@ export function ControlBar({
                 <IconFullscreen size={16} />
                 全屏
               </button>
+              {canRecord && (
+                <button
+                  type="button"
+                  className="tm-menu-item"
+                  onClick={() => {
+                    onOpenRecordings()
+                    setMoreOpen(false)
+                  }}
+                >
+                  <IconRecord size={16} />
+                  录制列表
+                </button>
+              )}
             </div>
           )}
         </div>

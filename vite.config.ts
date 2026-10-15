@@ -23,6 +23,8 @@ function buildProxy() {
     '/ice': { target: apiTarget, changeOrigin: true },
     '/graphql': { target: apiTarget, changeOrigin: true },
     '/healthz': { target: apiTarget, changeOrigin: true },
+    // 录制列表/下载：与其它 API 一样走反代（漏了它前端会 404，因为请求会打到 Vite 自己）
+    '/recordings': { target: apiTarget, changeOrigin: true },
   }
 }
 

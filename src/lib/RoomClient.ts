@@ -9,6 +9,7 @@
  * 所以：本类独占所有浏览器 API，对外只暴露不可变快照 + 订阅（配合 useSyncExternalStore）。
  */
 import { startVirtualBackground, type VirtualBackgroundHandle, type VirtualBackgroundMode } from './virtualBackground'
+import { fetchRecordings, type RecordingState, type RecordingsResponse } from './recordings'
 import type {
   Candidate,
   ChatMessage,
@@ -71,6 +72,8 @@ export interface RoomSnapshot {
   virtualBackground: VirtualBackgroundMode
   /** 正在加载模型/切换中（UI 用来禁用按钮并显示"处理中"） */
   virtualBackgroundBusy: boolean
+  /** 当前录制状态（服务端广播 + 入会快照；active=true 时全员显示红点） */
+  recording: RecordingState
 }
 
 export interface RoomClientOptions {
@@ -250,6 +253,7 @@ export class RoomClient {
       reconnectAttempt: 0,
       virtualBackground: 'off',
       virtualBackgroundBusy: false,
+      recording: { active: false },
     }
   }
 
@@ -300,7 +304,14 @@ export class RoomClient {
       this.resumeToken = joined.resumeToken
       saveResumeToken(this.opts.roomId, joined.resumeToken)
     }
-    this.update({ grants: decodeGrant(this.token), notice: null })
+    this.update({
+      // 服务端下发的权限优先：无鉴权模式下服务端会给全权限 devGrants，
+      // 只从令牌推断会让界面把主持人功能（录制/管理）误藏起来。
+      grants: joined.grants ?? decodeGrant(this.token),
+      notice: null,
+      // 入会快照带回录制状态：中途进来的人不必等下一次广播才知道"正在录制"
+      recording: joined.room?.recording ?? { active: false },
+    })
     const self = joined.room?.participants.find((p) => p.id === joined.participantId) ?? null
     this.update({
       self,
@@ -689,6 +700,8 @@ export class RoomClient {
       })),
       localTracks: this.localStream ? this.localStream.getTracks().map((tr) => `${tr.kind}:${tr.readyState}`) : [],
       // 端侧 AI 状态：给自动化探针一个可读的出口（真实用户界面不依赖它）
+      grants: this.snapshot.grants,
+      recordingActive: this.snapshot.recording.active,
       virtualBackground: this.snapshot.virtualBackground,
       virtualBackgroundBusy: this.snapshot.virtualBackgroundBusy,
       localVideoFromCanvas: this.localStream?.getVideoTracks()[0]?.label?.includes('canvas') ?? false,
@@ -1092,6 +1105,22 @@ export class RoomClient {
    * 执行主持人操作。服务端会校验 roomAdmin；失败时 request() 会以 error 拒绝，
    * 调用方据此给出提示（前端不自己判断权限，避免"看起来能点但必然失败"）。
    */
+  /**
+   * 开始/结束录制（需要 roomAdmin，服务端会强制校验）。
+   *
+   * 服务端在"转发即录制"的前提下启停都是即时的：开始 = 给房间里已在发布的轨道挂写入器，
+   * 停止 = 摘掉并收尾清单，所以这里不需要等待任何媒体协商。
+   */
+  async setRecording(action: 'start' | 'stop'): Promise<void> {
+    await this.request({ type: 'record', action }, ['record'], 8000)
+    this.update({ notice: action === 'start' ? '已开始录制（本机零转码落盘）' : '已停止录制，录制文件已写入服务端' })
+  }
+
+  /** 拉注册制会话列表（HTTP 查询，不走信令）。失败返回 null，由 UI 提示。 */
+  async listRecordings(): Promise<RecordingsResponse | null> {
+    return fetchRecordings()
+  }
+
   async moderate(action: 'mute' | 'kick', targetId: string): Promise<void> {
     await this.request({ type: 'moderate', action, targetId }, ['moderate'], 5000)
     if (action === 'kick') {
@@ -1292,6 +1321,10 @@ export class RoomClient {
       case 'active_speakers': {
         this.update({ speakers: msg.speakers ?? [] })
         return
+      }
+      case 'recording_state': {
+        this.update({ recording: msg.recording ?? { active: false } })
+        break
       }
       case 'chat_message': {
         if (!msg.message) return

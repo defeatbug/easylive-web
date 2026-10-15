@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ControlBar } from '../components/ControlBar'
 import { IconCheck, IconCopy } from '../components/Icons'
+import { RecordingsPanel } from '../components/RecordingsPanel'
 import { ShareDialog } from '../components/ShareDialog'
 import { SidePanel } from '../components/SidePanel'
 import { VideoTile } from '../components/VideoTile'
@@ -75,6 +76,8 @@ export function MeetingRoom({
   const [shareOpen, setShareOpen] = useState(false)
   /** 复制会议号后的短暂反馈（1.5s 后自动消失，不弹窗打断） */
   const [copied, setCopied] = useState(false)
+  /** 录制列表面板（仅主持人可打开） */
+  const [recordingsOpen, setRecordingsOpen] = useState(false)
   const [micId, setMicId] = useState<string | undefined>(initialDevices.micId)
   const [camId, setCamId] = useState<string | undefined>(initialDevices.camId)
 
@@ -225,6 +228,22 @@ export function MeetingRoom({
             正在共享屏幕
           </span>
         )}
+        {/* 录制红点：**全员可见**。"有人在录我"不该只有主持人知道。
+            状态来自服务端广播与入会快照，不是本地猜测。 */}
+        {snapshot.recording.active && (
+          <span
+            className="flex items-center gap-1.5 rounded bg-red-500/15 px-1.5 py-0.5 text-[11px] text-red-400"
+            title={`录制中${snapshot.recording.sessionId ? `（会话 ${snapshot.recording.sessionId}）` : ''}${
+              snapshot.recording.startedBy ? ` · 由 ${snapshot.recording.startedBy} 发起` : ''
+            }`}
+          >
+            <span className="tm-pulse h-1.5 w-1.5 rounded-full bg-red-500" />
+            录制中
+            {typeof snapshot.recording.files === 'number' && snapshot.recording.files > 0 && (
+              <span className="text-red-300/80">{snapshot.recording.files} 路</span>
+            )}
+          </span>
+        )}
         {speakerNames.length > 0 && (
           <span className="flex items-center gap-1.5 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[11px] text-emerald-300">
             <span className="flex h-3 items-end gap-[2px]">
@@ -370,6 +389,12 @@ export function MeetingRoom({
             dataChannelReady={snapshot.dataChannelReady}
             canPublish={snapshot.grants?.canPublish ?? true}
             canPublishData={snapshot.grants?.canPublishData ?? true}
+            recordingActive={snapshot.recording.active}
+            canRecord={snapshot.grants?.roomAdmin ?? false}
+            onToggleRecording={() =>
+              void client?.setRecording(snapshot.recording.active ? 'stop' : 'start')
+            }
+            onOpenRecordings={() => setRecordingsOpen(true)}
             virtualBackground={snapshot.virtualBackground}
             vbBusy={snapshot.virtualBackgroundBusy}
             onVirtualBackground={(m) => void client?.setVirtualBackground(m)}
@@ -412,6 +437,13 @@ export function MeetingRoom({
       ))}
 
       {shareOpen && <ShareDialog roomId={roomId} onClose={() => setShareOpen(false)} />}
+
+      {recordingsOpen && (
+        <RecordingsPanel
+          onLoad={() => client?.listRecordings() ?? Promise.resolve(null)}
+          onClose={() => setRecordingsOpen(false)}
+        />
+      )}
     </div>
   )
 }
