@@ -10,6 +10,7 @@
  */
 import { startVirtualBackground, type VirtualBackgroundHandle, type VirtualBackgroundMode } from './virtualBackground'
 import { fetchRecordings, type RecordingState, type RecordingsResponse } from './recordings'
+import type { WhiteboardOp } from './protocol'
 import type {
   Candidate,
   ChatMessage,
@@ -74,6 +75,8 @@ export interface RoomSnapshot {
   virtualBackgroundBusy: boolean
   /** 当前录制状态（服务端广播 + 入会快照；active=true 时全员显示红点） */
   recording: RecordingState
+  /** 房间白板内容（来自入会快照 + 服务端广播；存操作序列，可撤销、可完整还原） */
+  whiteboard: WhiteboardOp[]
 }
 
 export interface RoomClientOptions {
@@ -254,6 +257,7 @@ export class RoomClient {
       virtualBackground: 'off',
       virtualBackgroundBusy: false,
       recording: { active: false },
+      whiteboard: [],
     }
   }
 
@@ -311,6 +315,7 @@ export class RoomClient {
       notice: null,
       // 入会快照带回录制状态：中途进来的人不必等下一次广播才知道"正在录制"
       recording: joined.room?.recording ?? { active: false },
+      whiteboard: joined.room?.whiteboard ?? [],
     })
     const self = joined.room?.participants.find((p) => p.id === joined.participantId) ?? null
     this.update({
@@ -701,6 +706,7 @@ export class RoomClient {
       localTracks: this.localStream ? this.localStream.getTracks().map((tr) => `${tr.kind}:${tr.readyState}`) : [],
       // 端侧 AI 状态：给自动化探针一个可读的出口（真实用户界面不依赖它）
       grants: this.snapshot.grants,
+      whiteboardStrokes: this.snapshot.whiteboard.length,
       recordingActive: this.snapshot.recording.active,
       virtualBackground: this.snapshot.virtualBackground,
       virtualBackgroundBusy: this.snapshot.virtualBackgroundBusy,
@@ -1106,6 +1112,34 @@ export class RoomClient {
    * 调用方据此给出提示（前端不自己判断权限，避免"看起来能点但必然失败"）。
    */
   /**
+   * 提交一条白板操作。
+   *
+   * 刻意做成**一笔一条消息**（而不是每个采样点一条）：白板是共享状态，
+   * 一次绘制只产生一条小消息，既省带宽也避免把信令队列打满。
+   * 服务端会校验/裁剪并补上 by/seq，再广播回来——本地不等广播、立即先画（乐观渲染），
+   * 广播到达后按 seq 收敛，体感无延迟。
+   */
+  sendWhiteboardOp(op: WhiteboardOp): void {
+    this.send({ type: 'whiteboard', op })
+  }
+
+  /** 把服务端广播/入会快照里的白板操作应用到本地状态。 */
+  private applyWhiteboardOp(op: WhiteboardOp | undefined): void {
+    if (!op) return
+    const cur = this.snapshot.whiteboard
+    switch (op.kind) {
+      case 'clear':
+        this.update({ whiteboard: [] })
+        break
+      case 'undo':
+        this.update({ whiteboard: cur.slice(0, -1) })
+        break
+      default:
+        this.update({ whiteboard: [...cur, op] })
+    }
+  }
+
+  /**
    * 开始/结束录制（需要 roomAdmin，服务端会强制校验）。
    *
    * 服务端在"转发即录制"的前提下启停都是即时的：开始 = 给房间里已在发布的轨道挂写入器，
@@ -1321,6 +1355,10 @@ export class RoomClient {
       case 'active_speakers': {
         this.update({ speakers: msg.speakers ?? [] })
         return
+      }
+      case 'whiteboard_op': {
+        this.applyWhiteboardOp(msg.op)
+        break
       }
       case 'recording_state': {
         this.update({ recording: msg.recording ?? { active: false } })

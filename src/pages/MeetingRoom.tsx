@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ControlBar } from '../components/ControlBar'
 import { IconCheck, IconCopy } from '../components/Icons'
 import { RecordingsPanel } from '../components/RecordingsPanel'
+import { Whiteboard } from '../components/Whiteboard'
 import { closeAllDetachedWindows } from '../lib/multiWindow'
 import { ShareDialog } from '../components/ShareDialog'
 import { SidePanel } from '../components/SidePanel'
@@ -79,6 +80,8 @@ export function MeetingRoom({
   const [copied, setCopied] = useState(false)
   /** 录制列表面板（仅主持人可打开） */
   const [recordingsOpen, setRecordingsOpen] = useState(false)
+  /** 白板叠加层 */
+  const [whiteboardOpen, setWhiteboardOpen] = useState(false)
 
   // 离开会中页时关掉所有"独立窗口"：否则会留下一堆播放着已结束流的空窗口
   useEffect(() => () => closeAllDetachedWindows(), [])
@@ -393,6 +396,8 @@ export function MeetingRoom({
             dataChannelReady={snapshot.dataChannelReady}
             canPublish={snapshot.grants?.canPublish ?? true}
             canPublishData={snapshot.grants?.canPublishData ?? true}
+            whiteboardOpen={whiteboardOpen}
+            onToggleWhiteboard={() => setWhiteboardOpen((v) => !v)}
             recordingActive={snapshot.recording.active}
             canRecord={snapshot.grants?.roomAdmin ?? false}
             onToggleRecording={() =>
@@ -442,6 +447,16 @@ export function MeetingRoom({
       ))}
 
       {shareOpen && <ShareDialog roomId={roomId} onClose={() => setShareOpen(false)} />}
+
+      {whiteboardOpen && (
+        <Whiteboard
+          ops={snapshot.whiteboard}
+          selfId={snapshot.self?.id ?? null}
+          nameOf={(id) => snapshot.participants.find((p) => p.id === id)?.name ?? id}
+          onOp={(op) => client?.sendWhiteboardOp(op)}
+          onClose={() => setWhiteboardOpen(false)}
+        />
+      )}
 
       {recordingsOpen && (
         <RecordingsPanel

@@ -20,6 +20,7 @@ export type MsgType =
   | 'ping'
   | 'moderate' // 主持人操作：mute | kick（需要 roomAdmin）
   | 'record' // 录制开关：start | stop（需要 roomAdmin）
+  | 'whiteboard' // 白板操作：{op:{kind,stroke}}（任何参会者都可画）
   // 服务端 -> 客户端
   | 'joined'
   | 'participant_state'
@@ -35,6 +36,7 @@ export type MsgType =
   | 'force_mute'
   | 'chat_message'
   | 'recording_state' // 服务端广播录制状态（全员可见的"录制中"红点）
+  | 'whiteboard_op' // 服务端广播一条被接受的白板操作（带 by/seq）
   | 'pong'
   | 'error'
 
@@ -88,6 +90,31 @@ export interface TrackInfo {
 
 import type { RecordingState } from './recordings'
 
+/**
+ * 白板操作（与服务端 protocol.WhiteboardOp 1:1）。
+ *
+ * 坐标**归一化到 0..1**：参会者窗口大小不同，用设备像素会导致"我画的圆在别人那里变形"。
+ * Width 是"画布宽度按 1000 计"时的像素值，渲染时按实际宽度缩放。
+ */
+export type WhiteboardKind = 'stroke' | 'clear' | 'undo'
+export type WhiteboardTool = 'pen' | 'eraser' | 'line' | 'rect' | 'ellipse'
+
+export interface WhiteboardStroke {
+  tool: WhiteboardTool
+  color: string
+  width: number
+  points: [number, number][]
+}
+
+export interface WhiteboardOp {
+  kind: WhiteboardKind
+  stroke?: WhiteboardStroke
+  /** 服务端填写：谁画的 */
+  by?: string
+  /** 服务端填写：房间内递增序号 */
+  seq?: number
+}
+
 export interface RoomState {
   /** 当前是否正在录制（入会快照携带，中途进来的人也能看到红点） */
   recording?: RecordingState
@@ -96,6 +123,8 @@ export interface RoomState {
   tracks: TrackInfo[]
   /** 已举手参与者 ID（举手是状态，所以进快照：新入会者也能看到） */
   hands?: string[]
+  /** 房间当前的白板内容（入会快照携带：中途进来的人也能看到已画的内容） */
+  whiteboard?: WhiteboardOp[]
 }
 
 /**
@@ -181,6 +210,8 @@ export interface Message {
   participant?: PeerInfo
   room?: RoomState
   recording?: RecordingState
+  /** 白板操作载荷（whiteboard / whiteboard_op） */
+  op?: WhiteboardOp
   /** 服务端实际生效的权限（joined 下发；无鉴权模式为全权限 devGrants） */
   grants?: VideoGrant
   track?: TrackInfo

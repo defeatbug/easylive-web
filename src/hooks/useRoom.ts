@@ -25,6 +25,7 @@ const EMPTY: RoomSnapshot = {
   virtualBackground: 'off',
   virtualBackgroundBusy: false,
   recording: { active: false },
+  whiteboard: [],
   stats: null,
   error: null,
   reconnectAttempt: 0,

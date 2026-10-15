@@ -13,6 +13,7 @@ import {
   IconMore,
   IconQr,
   IconScreenShare,
+  IconWhiteboard,
   IconSidebar,
   IconSmile,
   IconStats,
@@ -68,6 +69,9 @@ interface ControlBarProps {
   onToggleRecording: () => void
   /** 打开录制列表 */
   onOpenRecordings: () => void
+  /** 白板是否已打开 */
+  whiteboardOpen: boolean
+  onToggleWhiteboard: () => void
 }
 
 /**
@@ -115,6 +119,8 @@ export function ControlBar({
   canRecord,
   onToggleRecording,
   onOpenRecordings,
+  whiteboardOpen,
+  onToggleWhiteboard,
 }: ControlBarProps) {
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
@@ -192,6 +198,17 @@ export function ControlBar({
           disabled={!canPublishData}
         >
           <IconHand size={20} raised={handRaised} />
+        </ToolButton>
+
+        {/* 白板：任何参会者都能用（服务端会校验发布数据权限） */}
+        <ToolButton
+          active={whiteboardOpen}
+          onClick={onToggleWhiteboard}
+          title={canPublishData ? '白板（所有人实时共享同一块画布）' : '当前令牌无发布数据权限'}
+          label="白板"
+          disabled={!canPublishData}
+        >
+          <IconWhiteboard size={20} />
         </ToolButton>
 
         {/* 录制：仅主持人可见。未开启录制能力时服务端会返回明确错误，按钮不显示。
