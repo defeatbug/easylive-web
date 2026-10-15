@@ -83,6 +83,30 @@ const c = await join('丙')
 await openBoard(c)
 check('丙 迟到加入也能看到当前白板内容', (await strokes(c)) === (await strokes(a)), `丙=${await strokes(c)} 甲=${await strokes(a)}`)
 
+// ---- 回归：必须"按住才画"，且抬手后笔画不能消失 ----
+// 曾把"正在画"和"等广播"混用一个引用：抬手后它仍活着，于是松开鼠标移动还会继续加点
+// （看起来像"不用按住也能画"），兜底超时把它清掉时笔画又消失——真人反馈的正是这个现象。
+const before = await strokes(a)
+await a.mouse.move(300, 700)
+await a.mouse.move(500, 780)
+await a.mouse.move(700, 760)
+await a.waitForTimeout(1200)
+check('松开后移动鼠标不会继续画（必须按住）', (await strokes(a)) === before, `笔数 ${before} → ${await strokes(a)}`)
+await a.waitForTimeout(3200)
+check('抬起后笔画不会自行消失', (await strokes(a)) === before, `笔数 ${before} → ${await strokes(a)}`)
+
+// 按住拖动应当只产生**一笔**（不是每个采样点一笔）
+const n0 = await strokes(a)
+await a.mouse.move(400, 300)
+await a.mouse.down()
+for (const x of [500, 600, 700, 800]) {
+  await a.mouse.move(x, 320)
+  await a.waitForTimeout(40)
+}
+await a.mouse.up()
+await a.waitForTimeout(1000)
+check('按住拖动只产生一笔（不是每个采样点一笔）', (await strokes(a)) === n0 + 1, `笔数 ${n0} → ${await strokes(a)}`)
+
 await browser.close()
 const pass = results.filter(([ok]) => ok).length
 console.log(`\n=== 白板验证：${pass}/${results.length} 通过 ===`)

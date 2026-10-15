@@ -38,7 +38,17 @@ export function Whiteboard({ ops, selfId, nameOf, onOp, onClose }: WhiteboardPro
   const wrapRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const committedRef = useRef<HTMLCanvasElement | null>(null)
+  /**
+   * 两个引用，**必须分开**：
+   *   - liveRef：正在画的那一笔，只有按住鼠标期间存在，也只有它会接收新采样点；
+   *   - pendingRef：已抬手、等广播回来的那一笔（乐观渲染用，避免笔画闪一下）。
+   *
+   * 曾经只用一个 ref 兼顾两者，结果抬手后它仍然"活着"：
+   * 松开鼠标后移动仍会往这一笔里加点（看起来像"不用按住也能画"），
+   * 等兜底超时把它清掉时笔画又**消失**了——真人反馈的正是这个现象。
+   */
   const liveRef = useRef<WhiteboardStroke | null>(null)
+  const pendingRef = useRef<WhiteboardStroke | null>(null)
   const drawRef = useRef<{ tool: WhiteboardTool; color: string; width: number; start: [number, number] | null }>({
     tool: 'pen',
     color: COLORS[0],
@@ -131,6 +141,8 @@ export function Whiteboard({ ops, selfId, nameOf, onOp, onClose }: WhiteboardPro
     ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.clearRect(0, 0, canvas.width, canvas.height)
     ctx.drawImage(off, 0, 0)
+    // 先画"已抬手待确认"的那一笔，再画"正在画"的这一笔
+    if (pendingRef.current) paintStroke(ctx, pendingRef.current, canvas.width, canvas.height)
     if (liveRef.current) paintStroke(ctx, liveRef.current, canvas.width, canvas.height)
   }
 
@@ -153,9 +165,10 @@ export function Whiteboard({ ops, selfId, nameOf, onOp, onClose }: WhiteboardPro
     return () => ro.disconnect()
   }, [ops])
 
-  // 服务端广播回来（ops 变长）后，清掉本地那一笔的"待确认"状态，避免重复绘制
+  // 服务端广播回来（ops 变长）后，清掉"待确认"的那一笔——它的副本已经在 ops 里了。
+  // 注意**不能**动 liveRef：那是用户此刻正按住画的笔，清掉会让正在画的一笔断掉。
   useEffect(() => {
-    liveRef.current = null
+    pendingRef.current = null
     repaint()
   }, [ops.length])
 
@@ -179,6 +192,7 @@ export function Whiteboard({ ops, selfId, nameOf, onOp, onClose }: WhiteboardPro
     const p = toNorm(e)
     d.start = p
     ;(e.target as HTMLElement).setPointerCapture?.(e.pointerId)
+    // 只有按下才开始接收采样点
     liveRef.current = { tool: d.tool, color: d.color, width: d.width, points: [p] }
     repaint()
   }
@@ -204,19 +218,23 @@ export function Whiteboard({ ops, selfId, nameOf, onOp, onClose }: WhiteboardPro
   const finishStroke = () => {
     const live = liveRef.current
     if (!live) return
+    // 关键：抬手后立刻停止接收采样点（这是"按住才能画"的开关）
+    liveRef.current = null
     if (live.points.length < 1) {
-      liveRef.current = null
+      repaint()
       return
     }
+    pendingRef.current = live
     onOp({ kind: 'stroke', stroke: live })
-    // 兜底：万一服务端没广播回来（被限速或白板已满），2.5s 后清掉本地这一笔，
+    // 兜底：万一服务端没广播回来（被限速或白板已满），2.5s 后清掉"待确认"的那一笔，
     // 否则它会永远留在画面上、看起来像"画上去了但其实没提交成功"。
     window.setTimeout(() => {
-      if (liveRef.current === live) {
-        liveRef.current = null
+      if (pendingRef.current === live) {
+        pendingRef.current = null
         repaint()
       }
     }, 2500)
+    repaint()
   }
 
   const savePng = () => {
@@ -313,7 +331,7 @@ export function Whiteboard({ ops, selfId, nameOf, onOp, onClose }: WhiteboardPro
             onPointerCancel={finishStroke}
             onPointerLeave={finishStroke}
           />
-          {ops.length === 0 && !liveRef.current && (
+          {ops.length === 0 && !liveRef.current && !pendingRef.current && (
             <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-neutral-400">
               在这里画点什么——所有人都会实时看到
             </p>
