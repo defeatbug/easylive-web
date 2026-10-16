@@ -1,19 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
+import { AccountDialog } from '../components/AccountDialog'
 import { DevicePicker } from '../components/DevicePicker'
 import {
   IconCalendar,
   IconCam,
-  IconContacts,
-  IconDoc,
+  IconCheck,
+  IconCopy,
   IconLink,
   IconMic,
   IconPlus,
-  IconSettings,
   IconShield,
+  IconStats,
   IconVideo,
 } from '../components/Icons'
 import { buildConstraints, useDevices } from '../lib/devices'
 import { useImeGuard } from '../lib/ime'
+import { initialsOf } from '../lib/avatar'
+import type { AccountUser } from '../lib/auth'
 
 export interface JoinRequest {
   roomId: string
@@ -33,6 +36,10 @@ export interface JoinRequest {
 
 interface JoinPageProps {
   onJoin: (req: JoinRequest) => void
+  user: AccountUser | null
+  onLogout: () => Promise<void>
+  /** 账号资料变更后回传最新用户，顶栏与会前页首字母随之刷新 */
+  onUserChange: (user: AccountUser) => void
 }
 
 const randomName = () => `访客${Math.floor(Math.random() * 900 + 100)}`
@@ -50,10 +57,10 @@ const randomRoom = () => `room-${Math.random().toString(36).slice(2, 8)}`
  * 功能上仍然保留我们原有的全部能力：实时预览、设备选择、昵称、主持人申请、
  * 以及把预览流**交接**给 RoomClient（避免 stop/start 之间摄像头被占用导致的偶发失败）。
  */
-export function JoinPage({ onJoin }: JoinPageProps) {
+export function JoinPage({ onJoin, user, onLogout, onUserChange }: JoinPageProps) {
   const params = new URLSearchParams(location.search)
   const [roomId, setRoomId] = useState(params.get('room') ?? 'demo-room')
-  const [displayName, setDisplayName] = useState(randomName())
+  const [displayName, setDisplayName] = useState(() => user?.displayName || user?.username || randomName())
   const [micId, setMicId] = useState<string | undefined>()
   const [camId, setCamId] = useState<string | undefined>()
   const [micOn, setMicOn] = useState(true)
@@ -61,6 +68,10 @@ export function JoinPage({ onJoin }: JoinPageProps) {
   const [asAdmin, setAsAdmin] = useState(false)
   const [preview, setPreview] = useState<MediaStream | null>(null)
   const [hint, setHint] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+  const [deviceRetry, setDeviceRetry] = useState(0)
+  /** 账号中心弹窗：左下角头像与顶栏账号都能打开它 */
+  const [accountOpen, setAccountOpen] = useState(false)
 
   const videoRef = useRef<HTMLVideoElement>(null)
   const ime = useImeGuard()
@@ -86,7 +97,10 @@ export function JoinPage({ onJoin }: JoinPageProps) {
         setHint(null)
       })
       .catch((e: unknown) => {
-        if (!cancelled) setHint(`无法访问摄像头/麦克风：${e instanceof Error ? e.message : String(e)}`)
+        if (!cancelled) {
+          setPreview(null)
+          setHint(`无法访问摄像头/麦克风：${e instanceof Error ? e.message : String(e)}`)
+        }
       })
 
     return () => {
@@ -94,7 +108,7 @@ export function JoinPage({ onJoin }: JoinPageProps) {
       // 除非已把流交接给 RoomClient，否则切换设备/离开页面时要释放设备
       if (!transferredRef.current) stream?.getTracks().forEach((t) => t.stop())
     }
-  }, [micId, camId, refresh])
+  }, [micId, camId, refresh, deviceRetry])
 
   // 开关状态只影响预览画面是否显示（真实发布在入会后由 RoomClient 处理）
   useEffect(() => {
@@ -146,94 +160,100 @@ export function JoinPage({ onJoin }: JoinPageProps) {
     })
   }
 
-  const navItems = [
-    { icon: <IconVideo size={22} />, label: '会议', active: true },
-    { icon: <IconContacts size={22} />, label: '通讯录', active: false },
-    { icon: <IconDoc size={22} />, label: '文档', active: false },
-    { icon: <IconCalendar size={22} />, label: '预定', active: false },
-  ]
+  const copyInvite = async () => {
+    if (!roomId.trim()) return
+    try {
+      const url = new URL(window.location.href)
+      url.hash = ''
+      url.search = ''
+      url.searchParams.set('room', roomId.trim())
+      await navigator.clipboard.writeText(url.toString())
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1800)
+    } catch {
+      setHint('无法复制邀请链接，请检查浏览器的剪贴板权限。')
+    }
+  }
 
   return (
-    <div className="flex min-h-full bg-[var(--bg)]">
-      {/* ---------- 左侧竖排导航（对齐客户端主导航）---------- */}
-      <nav className="flex w-[76px] shrink-0 flex-col items-center gap-1 border-r border-[var(--line)] bg-[var(--surface)] py-4">
-        <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-[var(--brand-strong)] text-sm font-semibold text-white">
-          E
+    <div className="prejoin-shell">
+      <nav className="prejoin-rail" aria-label="主导航">
+        <a className="prejoin-logo" href="/" title="Easylive 首页" aria-label="Easylive 首页"><IconVideo size={22} /></a>
+        <div className="prejoin-rail-links">
+          <a className="prejoin-rail-link is-active" href="/" aria-current="page" title="会议"><IconVideo size={20} /><span>会议</span></a>
+          <a className="prejoin-rail-link" href="#/metrics" title="数据看板"><IconStats size={20} /><span>数据</span></a>
         </div>
-        {navItems.map((it) => (
-          <button
-            key={it.label}
-            type="button"
-            title={it.label}
-            className={`flex w-[60px] flex-col items-center gap-1 rounded-lg py-2 text-[11px] transition ${
-              it.active
-                ? 'bg-[var(--brand-tint)] text-[var(--brand-strong)]'
-                : 'text-[var(--text-dim)] hover:bg-[var(--surface-2)]'
-            }`}
-          >
-            {it.icon}
-            {it.label}
-          </button>
-        ))}
-        <div className="mt-auto flex flex-col items-center gap-1">
-          <button
-            type="button"
-            title="设置"
-            className="flex w-[60px] flex-col items-center gap-1 rounded-lg py-2 text-[11px] text-[var(--text-dim)] transition hover:bg-[var(--surface-2)]"
-          >
-            <IconSettings size={22} />
-            设置
-          </button>
-          <div className="mt-1 flex h-8 w-8 items-center justify-center rounded-full bg-[var(--surface-3)] text-xs font-medium text-[var(--text-dim)]">
-            {displayName.slice(0, 1).toUpperCase()}
-          </div>
-        </div>
+        {/* 左下角：当前身份入口。已登录显示头像，访客显示昵称首字母；
+            点击后弹出居中的账号中心（资料 / 密码 / 头像 / 退出登录）。 */}
+        <button
+          type="button"
+          className={`prejoin-rail-bottom ${accountOpen ? 'is-open' : ''}`}
+          onClick={() => setAccountOpen(true)}
+          title={user ? `账号：${user.username}` : `访客：${displayName}`}
+          aria-haspopup="dialog"
+          aria-expanded={accountOpen}
+          aria-label={user ? `打开账号信息（${user.displayName || user.username}）` : '打开账号信息（访客）'}
+        >
+          {user?.avatarUrl
+            ? <img src={user.avatarUrl} alt="" />
+            : initialsOf(user ? (user.displayName || user.username) : displayName)}
+        </button>
       </nav>
 
-      {/* ---------- 主区 ---------- */}
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between px-8 pt-6">
-          <div>
-            <h1 className="text-[15px] font-semibold text-[var(--text)]">Easylive 会议</h1>
-            <p className="mt-0.5 text-[11px] text-[var(--text-mute)]">
-              基于 WebRTC 的轻量级实时音视频会议系统 · 单节点 SFU
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="rounded-full bg-[var(--brand-tint)] px-2.5 py-1 text-[11px] text-[var(--brand-strong)]">
-              {preview ? '设备就绪' : '等待设备授权'}
-            </span>
+      <div className="prejoin-workspace">
+        <header className="prejoin-topbar">
+          <div className="prejoin-wordmark">easylive<span className="prejoin-wordmark-dot">.</span></div>
+          <div className="prejoin-topbar-right">
+            <span className="prejoin-topbar-caption">让每一次连接，都恰到好处</span>
+            {/* 账号入口就是这一颗按钮：退出登录、改资料、改密码都在它弹出的弹窗里，
+                不再单独放一个"退出登录"，避免顶栏出现两个入口指向同一件事。 */}
+            <button
+              type="button"
+              className={`prejoin-account ${accountOpen ? 'is-open' : ''}`}
+              onClick={() => setAccountOpen(true)}
+              title={user ? `账号：${user.username}` : `访客：${displayName}`}
+              aria-haspopup="dialog"
+              aria-expanded={accountOpen}
+            >
+              <span className="prejoin-account-avatar" aria-hidden="true">
+                {user?.avatarUrl
+                  ? <img src={user.avatarUrl} alt="" />
+                  : initialsOf(user ? (user.displayName || user.username) : displayName)}
+              </span>
+              <span className="prejoin-account-name">{user ? (user.displayName || user.username) : displayName}</span>
+              <small>{user ? (user.role === 'host' ? '主持人' : '成员') : '访客'}</small>
+            </button>
+            <a className="prejoin-dashboard" href="#/metrics"><IconStats size={16} /> 数据看板</a>
           </div>
         </header>
-
-        <main className="mx-auto grid w-full max-w-5xl flex-1 grid-cols-1 content-start items-start gap-6 p-8 lg:grid-cols-[minmax(0,1fr)_380px]">
+        <main className="prejoin-content">
+          <section className="prejoin-intro" aria-labelledby="prejoin-heading">
+            <div className="prejoin-eyebrow"><span className="prejoin-eyebrow-line" /> YOUR MEETING SPACE</div>
+            <h1 id="prejoin-heading">好沟通，从这里<span>开始。</span></h1>
+            <p>进入熟悉的会议，或者开启一场新的对话。先确认设备，再安心入会。</p>
+          </section>
+          <div className="prejoin-grid">
           {/* 左：加入会议卡片 */}
-          <form onSubmit={submit} className="tm-card p-6">
-            <div className="mb-5 flex items-center gap-2">
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--brand-tint)] text-[var(--brand-strong)]">
-                <IconPlus size={18} />
-              </span>
-              <div>
-                <h2 className="text-sm font-semibold">加入会议</h2>
-                <p className="text-[11px] text-[var(--text-mute)]">输入会议号与昵称，或直接快速开会</p>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <label className="block">
-                <span className="mb-1.5 block text-xs text-[var(--text-dim)]">会议号 / 房间号</span>
+          <form onSubmit={submit} className="prejoin-join-card">
+            <div className="prejoin-card-topline"><span>01 / JOIN A MEETING</span><IconPlus size={19} /></div>
+            <h2>加入会议</h2>
+            <p className="prejoin-card-description">填好会议号和你的名字，下一步就是见面。</p>
+            <div className="prejoin-fields">
+              <label className="prejoin-field">
+                <span>会议号</span>
                 <input
                   value={roomId}
-                  onChange={(e) => setRoomId(e.target.value)}
+                  onChange={(e) => { setRoomId(e.target.value); setCopied(false) }}
                   onKeyDown={onInputKeyDown}
                   onCompositionStart={ime.onCompositionStart}
                   onCompositionEnd={ime.onCompositionEnd}
-                  placeholder="例如 demo-room"
-                  className="tm-input"
+                  placeholder="输入会议号，例如 demo-room"
+                  autoComplete="off"
+                  required
                 />
               </label>
-              <label className="block">
-                <span className="mb-1.5 block text-xs text-[var(--text-dim)]">你的昵称</span>
+              <label className="prejoin-field">
+                <span>你的昵称</span>
                 <input
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
@@ -242,109 +262,126 @@ export function JoinPage({ onJoin }: JoinPageProps) {
                   onCompositionEnd={ime.onCompositionEnd}
                   placeholder="会中显示的名字"
                   maxLength={24}
-                  className="tm-input"
+                  required
                 />
               </label>
             </div>
 
-            <label className="mt-3 flex cursor-pointer items-center gap-2 text-xs text-[var(--text-dim)]">
-              <input
-                type="checkbox"
-                checked={asAdmin}
-                onChange={(e) => setAsAdmin(e.target.checked)}
-                className="h-3.5 w-3.5 accent-[var(--brand-strong)]"
-              />
-              <IconShield size={14} />
-              以主持人身份加入（可强制静音 / 移出参与者）
-            </label>
+            {user ? (
+              <p className="prejoin-host-option"><IconShield size={14} />
+                <span>已登录为 {user.role === 'host' ? '主持人' : '成员'} <small>会议权限由服务器按账号分配</small></span>
+              </p>
+            ) : (
+              <label className="prejoin-host-option">
+                <input type="checkbox" checked={asAdmin} onChange={(e) => setAsAdmin(e.target.checked)} />
+                <IconShield size={14} />
+                <span>以主持人身份加入 <small>演示模式 · 可管理参会者</small></span>
+              </label>
+            )}
 
-            <div className="mt-5 flex gap-3">
-              <button type="submit" className="tm-btn-primary flex-1 py-2.5 text-sm">
-                加入房间
+            <div className="prejoin-actions">
+              <button type="submit" className="prejoin-primary">
+                加入会议 <span aria-hidden="true">↗</span>
               </button>
-              <button type="button" onClick={quickStart} className="tm-btn px-4 py-2.5 text-sm">
-                快速会议
+              <button type="button" onClick={quickStart} className="prejoin-secondary">
+                <IconVideo size={17} /> 快速会议
               </button>
             </div>
 
-            {/* data-testid：探针原来用 "form 里第一个 p" 定位这句提示，属于隐式耦合——
-                卡片副标题一变就会误抓。给它一个显式钩子，文案布局怎么改都不会误判。 */}
-            <p
-              data-testid="prejoin-hint"
-              className="mt-4 text-[11px] leading-relaxed text-[var(--text-mute)]"
-            >
-              {hint ?? '会前先确认设备与昵称；局域网访问需要 HTTPS，后端需设置 SFU_ADVERTISE_IP。'}
+            <p data-testid="prejoin-hint" role={hint ? 'alert' : undefined} className={`prejoin-hint ${hint ? 'is-error' : ''}`}>
+              {hint ?? '会前先确认设备与昵称。快速会议将自动生成一个新的会议号。'}
             </p>
           </form>
 
           {/* 右：入会前设置（预览 + 设备） */}
-          <section className="tm-card flex flex-col p-4">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-semibold">入会前设置</h2>
-              <button
-                type="button"
-                onClick={() => refresh()}
-                className="rounded-md px-2 py-1 text-[11px] text-[var(--text-dim)] transition hover:bg-[var(--surface-2)]"
-                title="重新枚举设备"
-              >
-                刷新设备
-              </button>
+          <section className="prejoin-device-card" aria-labelledby="prejoin-device-heading">
+            <div className="prejoin-device-header">
+              <div>
+                <div className="prejoin-section-label">02 / CHECK YOUR SETUP</div>
+                <h2 id="prejoin-device-heading">入会前设置</h2>
+              </div>
+              <span className={`prejoin-device-status ${preview ? 'is-ready' : ''}`}>
+                <span aria-hidden="true" />{preview ? '设备已就绪' : '等待设备授权'}
+              </span>
             </div>
 
-            <div className="relative aspect-video w-full overflow-hidden rounded-lg bg-[#0d0f12]">
+            <div className="prejoin-camera-stage">
               <video
                 ref={videoRef}
                 autoPlay
                 playsInline
                 muted
-                className={`h-full w-full -scale-x-100 object-cover ${camOn && preview ? '' : 'opacity-0'}`}
+                className={`prejoin-video ${camOn && preview ? '' : 'opacity-0'}`}
               />
               {(!camOn || !preview) && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2">
-                  <div className="flex h-20 w-20 items-center justify-center rounded-full bg-[var(--brand-strong)]/85 text-2xl font-medium text-white">
-                    {displayName.slice(0, 1).toUpperCase()}
-                  </div>
-                  <span className="text-[11px] text-white/70">
-                    {camOn ? '等待摄像头画面…' : '摄像头已关闭'}
-                  </span>
+                <div className="prejoin-camera-placeholder">
+                  <div className="prejoin-avatar">{displayName.slice(0, 1).toUpperCase()}</div>
+                  <span>{camOn ? '等待摄像头画面…' : '摄像头已关闭'}</span>
                 </div>
               )}
+              <div className="prejoin-preview-tag"><span aria-hidden="true" /> 本地预览</div>
+              <div className="prejoin-preview-name">{displayName.trim() || '我'}</div>
             </div>
 
-            <div className="mt-3 flex flex-wrap gap-2">
-              <DevicePicker
-                icon={<IconMic size={18} muted={!micOn} />}
-                label={micOn ? '麦克风' : '麦克风已关'}
-                title={micOn ? '关闭麦克风' : '开启麦克风'}
-                active={micOn}
-                devices={mics}
-                currentId={micId}
-                onToggle={() => setMicOn((v) => !v)}
-                onSelect={setMicId}
-                disabled={!micOn}
-              />
-              <DevicePicker
-                icon={<IconCam size={18} muted={!camOn} />}
-                label={camOn ? '摄像头' : '摄像头已关'}
-                title={camOn ? '关闭摄像头' : '开启摄像头'}
-                active={camOn}
-                devices={cams}
-                currentId={camId}
-                onToggle={() => setCamOn((v) => !v)}
-                onSelect={setCamId}
-                disabled={!camOn}
-              />
-            </div>
-
-            <div className="mt-4 rounded-lg bg-[var(--surface-2)] p-3">
-              <div className="flex items-center gap-2 text-[11px] text-[var(--text-dim)]">
-                <IconLink size={14} />
-                邀请链接会带上会议号，可直接分享
+            <div className="prejoin-device-controls">
+              <div className="prejoin-control-label">设备检查 <span>只有加入会议后才会发布音视频</span></div>
+              <div className="prejoin-pickers">
+                <DevicePicker
+                  icon={<IconMic size={18} muted={!micOn} />}
+                  label={micOn ? '麦克风' : '麦克风已关'}
+                  title={micOn ? '关闭麦克风' : '开启麦克风'}
+                  active={micOn}
+                  devices={mics}
+                  currentId={micId}
+                  onToggle={() => setMicOn((v) => !v)}
+                  onSelect={setMicId}
+                  disabled={!micOn}
+                />
+                <DevicePicker
+                  icon={<IconCam size={18} muted={!camOn} />}
+                  label={camOn ? '摄像头' : '摄像头已关'}
+                  title={camOn ? '关闭摄像头' : '开启摄像头'}
+                  active={camOn}
+                  devices={cams}
+                  currentId={camId}
+                  onToggle={() => setCamOn((v) => !v)}
+                  onSelect={setCamId}
+                  disabled={!camOn}
+                />
+                <button type="button" className="prejoin-refresh" onClick={() => { refresh(); setDeviceRetry((v) => v + 1) }}>
+                  {hint?.startsWith('无法访问') ? '重试打开设备' : '刷新设备'}
+                </button>
               </div>
             </div>
           </section>
+          </div>
+
+          <div className="prejoin-bottom-grid">
+            <div className="prejoin-info-card">
+              <span className="prejoin-info-icon"><IconLink size={19} /></span>
+              <div><strong>分享会议链接</strong><p>复制当前会议号的邀请链接，发给想见的人。</p></div>
+              <button type="button" className="prejoin-info-action" onClick={() => void copyInvite()} disabled={!roomId.trim()} aria-live="polite">
+                {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}{copied ? '已复制' : '复制链接'}
+              </button>
+            </div>
+            <div className="prejoin-info-card prejoin-info-card-muted">
+              <span className="prejoin-info-icon"><IconCalendar size={19} /></span>
+              <div><strong>随时开始</strong><p>无需预约，快速会议会生成一个新的会议号。</p></div>
+            </div>
+          </div>
+          <footer className="prejoin-footer"><span>easylive · 轻量实时音视频会议</span><span>为了更好的体验，请使用支持 WebRTC 的浏览器</span></footer>
         </main>
       </div>
+
+      {accountOpen && (
+        <AccountDialog
+          user={user}
+          guestName={displayName}
+          onClose={() => setAccountOpen(false)}
+          onUserChange={onUserChange}
+          onLogout={onLogout}
+        />
+      )}
     </div>
   )
 }

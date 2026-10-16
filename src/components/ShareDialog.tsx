@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import QRCode from 'qrcode'
 
 interface ShareDialogProps {
@@ -12,6 +12,8 @@ interface ShareDialogProps {
  */
 export function ShareDialog({ roomId, onClose }: ShareDialogProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const feedbackTimer = useRef<number | null>(null)
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle')
   const url = `${location.origin}${location.pathname}?room=${encodeURIComponent(roomId)}`
 
   useEffect(() => {
@@ -34,8 +36,19 @@ export function ShareDialog({ roomId, onClose }: ShareDialogProps) {
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  const copy = () => {
-    void navigator.clipboard?.writeText(url)
+  useEffect(() => () => {
+    if (feedbackTimer.current) window.clearTimeout(feedbackTimer.current)
+  }, [])
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(url)
+      setCopyState('copied')
+    } catch {
+      setCopyState('error')
+    }
+    if (feedbackTimer.current) window.clearTimeout(feedbackTimer.current)
+    feedbackTimer.current = window.setTimeout(() => setCopyState('idle'), 2500)
   }
 
   return (
@@ -44,12 +57,15 @@ export function ShareDialog({ roomId, onClose }: ShareDialogProps) {
       onClick={onClose}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="share-dialog-heading"
         className="w-full max-w-sm rounded-xl border border-white/10 bg-[var(--surface-2)] p-6 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4 flex items-start justify-between">
           <div>
-            <h2 className="text-base font-semibold text-neutral-100">邀请他人入会</h2>
+            <h2 id="share-dialog-heading" className="text-base font-semibold text-neutral-100">邀请他人入会</h2>
             <p className="mt-0.5 text-xs text-neutral-400">房间：{roomId}</p>
           </div>
           <button
@@ -75,12 +91,16 @@ export function ShareDialog({ roomId, onClose }: ShareDialogProps) {
             className="min-w-0 flex-1 bg-transparent px-1 text-xs text-neutral-300 outline-none"
           />
           <button
-            onClick={copy}
+            type="button"
+            onClick={() => void copy()}
             className="shrink-0 rounded-md bg-[var(--brand)] px-2.5 py-1.5 text-xs font-medium text-white transition hover:brightness-110"
           >
-            复制
+            {copyState === 'copied' ? '已复制' : '复制'}
           </button>
         </div>
+        <p role="status" aria-live="polite" className={`mt-2 min-h-4 text-xs ${copyState === 'error' ? 'text-red-300' : 'text-emerald-300'}`}>
+          {copyState === 'error' ? '复制失败，请选中上方链接手动复制。' : copyState === 'copied' ? '邀请链接已复制，可以发给参会者。' : ''}
+        </p>
 
         <p className="mt-3 text-[11px] leading-relaxed text-neutral-500">
           手机扫码后如提示证书不受信任，选择"继续访问"即可（开发环境用的是自签证书）。

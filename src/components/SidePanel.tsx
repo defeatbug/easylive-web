@@ -42,7 +42,7 @@ export function SidePanel({
   onSend,
 }: SidePanelProps) {
   return (
-    <aside className="flex w-80 shrink-0 flex-col border-l border-white/5 bg-[var(--surface)]">
+    <aside className="meeting-sidepanel flex w-80 shrink-0 flex-col border-l border-white/5 bg-[var(--surface)]">
       <div className="flex items-center justify-between px-3 py-2">
         <div className="flex gap-1">
           <TabButton active={tab === 'chat'} onClick={() => onTabChange('chat')}>

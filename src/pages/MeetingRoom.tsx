@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ControlBar } from '../components/ControlBar'
 import { IconCheck, IconCopy } from '../components/Icons'
+import type { AccountUser } from '../lib/auth'
 import { RecordingsPanel } from '../components/RecordingsPanel'
 import { Whiteboard } from '../components/Whiteboard'
 import { AudioSink } from '../components/AudioSink'
@@ -24,6 +25,8 @@ interface MeetingRoomProps {
   /** 以主持人身份加入（申请 roomAdmin） */
   asAdmin?: boolean
   onLeave: () => void
+  user: AccountUser | null
+  onLogout: () => Promise<void>
 }
 
 interface Tile {
@@ -62,6 +65,8 @@ export function MeetingRoom({
   previewStream,
   asAdmin,
   onLeave,
+  user,
+  onLogout,
 }: MeetingRoomProps) {
   const { client, snapshot, error, retryMedia, retryConnect } = useRoom(true, roomId, displayName, {
     devices: initialDevices,
@@ -77,6 +82,7 @@ export function MeetingRoom({
   const [view, setView] = useState<ViewMode>('grid')
   const [activeKey, setActiveKey] = useState<string | null>(null)
   const [shareOpen, setShareOpen] = useState(false)
+  const [accountError, setAccountError] = useState<string | null>(null)
   /** 复制会议号后的短暂反馈（1.5s 后自动消失，不弹窗打断） */
   const [copied, setCopied] = useState(false)
   /** 录制列表面板（仅主持人可打开） */
@@ -178,23 +184,6 @@ export function MeetingRoom({
     return out
   }, [snapshot, displayName])
 
-  /**
-   * 远端音频：**与视觉布局解耦**。
-   * 屏幕共享布局下我们不再渲染其他访客的瓦片，如果声音靠瓦片里的 <video> 播放，
-   * 那些人的声音就会一起消失。所以每个远端参与者单独挂一个 <audio>，任何布局下都能听见。
-   */
-  const remoteAudios = useMemo(() => {
-    const out: Array<{ id: string; stream: MediaStream }> = []
-    for (const p of snapshot.participants) {
-      if (p.id === snapshot.self?.id) continue
-      const audio = snapshot.tracks.find((t) => t.publisherId === p.id && t.kind === 'audio')
-      if (!audio) continue
-      const stream = snapshot.remoteStreams[audio.id]
-      if (stream) out.push({ id: audio.id, stream })
-    }
-    return out
-  }, [snapshot])
-
   const screenTiles = tiles.filter((t) => t.screen)
   const hasScreen = screenTiles.length > 0
 
@@ -209,10 +198,13 @@ export function MeetingRoom({
 
   return (
     <div className="theme-meeting flex h-full flex-col bg-[var(--bg)]">
-      {/* 顶部信息栏：左=会议号（可复制）+ 在线人数 + 状态徽标；右=网络质量 + 实时指标。
-          对齐腾讯会议客户端：信息全部收在一条 48px 的栏里，把纵向空间留给画面。 */}
-      <header className="relative z-20 flex h-12 shrink-0 items-center gap-2 border-b border-[var(--line)] bg-[var(--surface)] px-4">
-        <span className="text-sm font-medium text-[var(--text)]">{roomId}</span>
+      <header className="meeting-topbar relative z-20 flex shrink-0 items-center gap-3 border-b border-[var(--line)] bg-[var(--surface)] px-5">
+        <span className="meeting-brand" aria-label="Easylive">e<span>.</span></span>
+        <span className="meeting-topbar-divider" />
+        <div className="meeting-title-group">
+          <span className="meeting-title-label">正在进行的会议</span>
+          <span className="meeting-room-name" title={roomId}>{roomId}</span>
+        </div>
         <button
           type="button"
           onClick={() => {
@@ -225,14 +217,17 @@ export function MeetingRoom({
             )
           }}
           title="复制会议号"
-          className="rounded-md p-1 text-[var(--text-dim)] transition hover:bg-[var(--surface-3)] hover:text-[var(--text)]"
+          aria-label={copied ? '会议号已复制' : '复制会议号'}
+          className="meeting-icon-button"
         >
-          {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
+          {copied ? <IconCheck size={15} /> : <IconCopy size={15} />}
         </button>
         <ConnectionPill connection={snapshot.connection} />
-        <span className="text-xs text-[var(--text-mute)]">{snapshot.participants.length} 人在线</span>
+        <button type="button" onClick={() => { setTab('people'); setPanelOpen(true) }} className="meeting-participants" title="查看参会成员">
+          {snapshot.participants.length} 人在线
+        </button>
         {hasScreen && (
-          <span className="rounded bg-[var(--brand-tint)] px-1.5 py-0.5 text-[11px] text-[var(--brand)]">
+          <span className="meeting-screen-indicator rounded bg-[var(--brand-tint)] px-1.5 py-0.5 text-[11px] text-[var(--brand)]">
             正在共享屏幕
           </span>
         )}
@@ -240,7 +235,7 @@ export function MeetingRoom({
             状态来自服务端广播与入会快照，不是本地猜测。 */}
         {snapshot.recording.active && (
           <span
-            className="flex items-center gap-1.5 rounded bg-red-500/15 px-1.5 py-0.5 text-[11px] text-red-400"
+            className="meeting-recording-indicator flex items-center gap-1.5 rounded bg-red-500/15 px-1.5 py-0.5 text-[11px] text-red-400"
             title={`录制中${snapshot.recording.sessionId ? `（会话 ${snapshot.recording.sessionId}）` : ''}${
               snapshot.recording.startedBy ? ` · 由 ${snapshot.recording.startedBy} 发起` : ''
             }`}
@@ -253,7 +248,7 @@ export function MeetingRoom({
           </span>
         )}
         {speakerNames.length > 0 && (
-          <span className="flex items-center gap-1.5 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[11px] text-emerald-300">
+          <span className="meeting-speaker-indicator flex items-center gap-1.5 rounded bg-emerald-500/15 px-1.5 py-0.5 text-[11px] text-emerald-300">
             <span className="flex h-3 items-end gap-[2px]">
               <span className="w-[2px] animate-pulse rounded-sm bg-emerald-400" style={{ height: '60%' }} />
               <span className="w-[2px] animate-pulse rounded-sm bg-emerald-400" style={{ height: '100%' }} />
@@ -263,12 +258,14 @@ export function MeetingRoom({
           </span>
         )}
 
-        <div className="ml-auto flex items-center gap-3">
-          <div className="hidden items-center gap-2 sm:flex" title={`网络质量：${quality.label}（${quality.score}）`}>
+        <div className="meeting-topbar-right ml-auto flex items-center gap-3">
+          <div className="meeting-quality" title={`网络质量：${quality.label}（${quality.score}）`}>
             <span className={`h-2 w-2 rounded-full ${quality.dot}`} />
             <span className={`text-[11px] font-medium ${quality.text}`}>{quality.label}</span>
           </div>
           <StatsInline stats={snapshot.stats} />
+          {user && <span className="meeting-account" title={`已登录：${user.username}`}>{user.displayName || user.username} · {user.role === 'host' ? '主持人' : '成员'}</span>}
+          <button type="button" onClick={() => setShareOpen(true)} className="meeting-invite">邀请参会 <span aria-hidden="true">↗</span></button>
         </div>
       </header>
 
@@ -293,10 +290,11 @@ export function MeetingRoom({
         </div>
       )}
 
-      {error && (
-        <div className="relative z-20 mx-4 mb-2 flex shrink-0 items-center gap-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
-          <span className="min-w-0 flex-1">{error}</span>
-          {snapshot.connection === 'closed' && (
+      {(error || accountError) && (
+        <div role="alert" className="relative z-20 mx-4 mb-2 flex shrink-0 items-center gap-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+          <span className="min-w-0 flex-1">{accountError ?? error}</span>
+          {accountError && <button type="button" onClick={() => setAccountError(null)} className="shrink-0 rounded px-2 py-1 hover:bg-red-500/20">关闭</button>}
+          {error && snapshot.connection === 'closed' && (
             <button
               onClick={retryConnect}
               className="shrink-0 rounded border border-red-400/40 px-2 py-1 font-medium transition hover:bg-red-500/20"
@@ -304,7 +302,7 @@ export function MeetingRoom({
               重新连接
             </button>
           )}
-          {!snapshot.localStream && (
+          {error && !snapshot.localStream && (
             <button
               onClick={() => void retryMedia()}
               className="shrink-0 rounded border border-red-400/40 px-2 py-1 font-medium transition hover:bg-red-500/20"
@@ -315,7 +313,7 @@ export function MeetingRoom({
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1">
+      <div className="meeting-body relative flex min-h-0 flex-1">
         <main className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden">
           {/* 表情浮层：绝对定位、不参与排版、不拦截鼠标 */}
           {snapshot.reactions.length > 0 && (
@@ -334,7 +332,7 @@ export function MeetingRoom({
             </div>
           )}
 
-          <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-24">
+          <div className="meeting-stage min-h-0 flex-1 overflow-y-auto px-4 pb-24">
             {tiles.length === 0 ? (
               <p className="py-24 text-center text-sm text-neutral-500">等待其他人加入…</p>
             ) : view === 'sidebar' && activeTile ? (
@@ -410,6 +408,7 @@ export function MeetingRoom({
             onVirtualBackground={(m) => void client?.setVirtualBackground(m)}
             onToggleHand={() => client?.toggleHand()}
             onReaction={(emoji) => client?.sendReaction(emoji)}
+            onLogout={user ? async () => { try { await onLogout() } catch (reason) { setAccountError(reason instanceof Error ? reason.message : '退出登录失败，请重试。') } } : undefined}
             onLeave={() => {
               closeAllDetachedWindows()
               client?.leave()
@@ -441,11 +440,6 @@ export function MeetingRoom({
           />
         )}
       </div>
-
-      {/* 远端音频（隐藏元素，不参与排版） */}
-      {remoteAudios.map(({ id, stream }) => (
-        <RemoteAudio key={id} stream={stream} />
-      ))}
 
       {shareOpen && <ShareDialog roomId={roomId} onClose={() => setShareOpen(false)} />}
 
@@ -482,18 +476,6 @@ export function MeetingRoom({
       )}
     </div>
   )
-}
-
-/** 只负责播放远端声音的隐藏元素。 */
-function RemoteAudio({ stream }: { stream: MediaStream }) {
-  const ref = useRef<HTMLAudioElement>(null)
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    if (el.srcObject !== stream) el.srcObject = stream
-    void el.play().catch(() => {})
-  }, [stream])
-  return <audio ref={ref} autoPlay />
 }
 
 /** 纯宫格：没有人共享屏幕时使用（保持原来的观感：固定断点 + 16:9 宽度驱动） */
@@ -682,9 +664,9 @@ function SidebarLayout({
   onToggleSidebar: () => void
 }) {
   return (
-    <div className="flex h-full min-h-0 gap-3">
+    <div className="meeting-sidebar-layout flex h-full min-h-0 gap-3">
       {/* p-1 保证选中态 ring 不被 overflow 裁掉 */}
-      <aside className="flex w-40 shrink-0 flex-col gap-2 overflow-y-auto p-1 sm:w-44">
+      <aside className="meeting-sidebar-list flex w-40 shrink-0 flex-col gap-2 overflow-y-auto p-1 sm:w-44">
         {tiles.map((t) => (
           <button
             key={t.key}
@@ -706,7 +688,7 @@ function SidebarLayout({
         ))}
       </aside>
 
-      <div className="h-full min-h-0 flex-1">
+      <div className="meeting-sidebar-stage h-full min-h-0 flex-1">
         <VideoTile
           stream={active.stream}
           label={active.label}

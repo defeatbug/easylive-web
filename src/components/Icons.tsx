@@ -240,3 +240,60 @@ export const IconDoc = (p: IconProps) => (
     <path d="M14 3v4h4M9 12h6M9 16h6" />
   </Svg>
 )
+
+export const IconEye = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M2.5 12S6 6 12 6s9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z" />
+    <circle cx="12" cy="12" r="2.8" />
+  </Svg>
+)
+
+export const IconEyeOff = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M3 3l18 18M10.5 10.7a2.8 2.8 0 0 0 4 3.9M9.4 5.3A9.6 9.6 0 0 1 12 5c6 0 9.5 7 9.5 7a16 16 0 0 1-2.3 3.2M6.1 7.7A16 16 0 0 0 2.5 12S6 18 12 18a9.7 9.7 0 0 0 3-.5" />
+  </Svg>
+)
+
+export const IconUser = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="12" cy="8" r="3.5" />
+    <path d="M5 20a7 7 0 0 1 14 0" />
+  </Svg>
+)
+
+export const IconLock = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="5" y="11" width="14" height="10" rx="2" />
+    <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+  </Svg>
+)
+
+export const IconSpinner = ({ size = 20, ...p }: IconProps) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" fill="none" {...p}>
+    <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" opacity="0.25" />
+    <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+    <animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="0.8s" repeatCount="indefinite" />
+  </svg>
+)
+
+export const IconCamera = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 8h2.2l1.3-2h9l1.3 2H20a1.5 1.5 0 0 1 1.5 1.5v8A1.5 1.5 0 0 1 20 19H4a1.5 1.5 0 0 1-1.5-1.5v-8A1.5 1.5 0 0 1 4 8z" />
+    <circle cx="12" cy="13" r="3.2" />
+  </Svg>
+)
+
+export const IconKey = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="8" cy="15" r="4" />
+    <path d="M11 12l9-9M17 3l2.5 2.5M14.5 5.5L17 8" />
+  </Svg>
+)
+
+export const IconTrash = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M4 7h16M9.5 7V4.8A1.3 1.3 0 0 1 10.8 3.5h2.4a1.3 1.3 0 0 1 1.3 1.3V7" />
+    <path d="M6.5 7l1 12.2A1.4 1.4 0 0 0 8.9 20.5h6.2a1.4 1.4 0 0 0 1.4-1.3L17.5 7" />
+    <path d="M10.5 11v6M13.5 11v6" />
+  </Svg>
+)

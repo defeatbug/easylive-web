@@ -45,6 +45,7 @@ interface ControlBarProps {
   onToggleView: () => void
   onShare: () => void
   onLeave: () => void
+  onLogout?: () => Promise<void>
   onSelectMic: (deviceId: string) => void
   onSelectCam: (deviceId: string) => void
   /** 自己是否已举手（状态来自服务端） */
@@ -119,6 +120,7 @@ export function ControlBar({
   canRecord,
   onToggleRecording,
   onOpenRecordings,
+  onLogout,
   whiteboardOpen,
   onToggleWhiteboard,
 }: ControlBarProps) {
@@ -134,8 +136,8 @@ export function ControlBar({
   usePopover(fxOpen, setFxOpen, fxRef)
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 flex justify-center px-4 pb-4">
-      <div className="pointer-events-auto flex items-center gap-1 rounded-xl border border-[var(--line)] bg-[var(--surface)]/95 px-2 py-1.5 shadow-[var(--shadow-pop)] backdrop-blur">
+    <div className="meeting-toolbar pointer-events-none absolute inset-x-0 bottom-0 z-30 flex justify-center px-4 pb-4">
+      <div className="meeting-toolbar-inner pointer-events-auto flex items-center gap-1 rounded-xl border border-[var(--line)] bg-[var(--surface)]/95 px-2 py-1.5 shadow-[var(--shadow-pop)] backdrop-blur">
         <DevicePicker
           variant="tool"
           icon={<IconMic size={20} muted={!micEnabled} />}
@@ -172,6 +174,7 @@ export function ControlBar({
         </ToolButton>
 
         <ToolButton
+          mobileSecondary
           active={view === 'sidebar'}
           onClick={onToggleView}
           title="成员列表：切换宫格 / 左侧访客栏"
@@ -183,6 +186,7 @@ export function ControlBar({
           <IconChat size={20} />
         </ToolButton>
         <ToolButton
+          mobileSecondary
           active={handRaised}
           onClick={onToggleHand}
           title={
@@ -202,6 +206,7 @@ export function ControlBar({
 
         {/* 白板：任何参会者都能用（服务端会校验发布数据权限） */}
         <ToolButton
+          mobileSecondary
           active={whiteboardOpen}
           onClick={onToggleWhiteboard}
           title={canPublishData ? '白板（所有人实时共享同一块画布）' : '当前令牌无发布数据权限'}
@@ -218,7 +223,7 @@ export function ControlBar({
             type="button"
             onClick={onToggleRecording}
             title={recordingActive ? '停止录制' : '开始录制（转发即录制，零转码落盘）'}
-            className={`tm-tool ${recordingActive ? 'tm-tool-recording' : ''}`}
+            className={`tm-tool meeting-mobile-secondary ${recordingActive ? 'tm-tool-recording' : ''}`}
           >
             <span className={recordingActive ? 'tm-pulse' : undefined}>
               <IconRecord size={20} />
@@ -228,7 +233,7 @@ export function ControlBar({
         )}
 
         {/* 端侧 AI：虚拟背景（人像分割在本机跑，画面不上传） */}
-        <div className="relative" ref={fxRef}>
+        <div className="meeting-mobile-secondary relative" ref={fxRef}>
           <ToolButton
             active={virtualBackground !== 'off'}
             onClick={() => setFxOpen((v) => !v)}
@@ -269,7 +274,7 @@ export function ControlBar({
         </div>
 
         {/* 表情：向上展开的浮层 */}
-        <div className="relative" ref={emojiRef}>
+        <div className="meeting-mobile-secondary relative" ref={emojiRef}>
           <ToolButton
             active={emojiOpen}
             onClick={() => setEmojiOpen((v) => !v)}
@@ -310,7 +315,7 @@ export function ControlBar({
             <IconMore size={20} />
           </ToolButton>
           {moreOpen && (
-            <div className="tm-menu absolute bottom-full right-0 z-20 mb-2 w-48">
+            <div className="tm-menu meeting-more-menu absolute bottom-full right-0 z-20 mb-2 w-52">
               <button
                 type="button"
                 className="tm-menu-item"
@@ -322,6 +327,23 @@ export function ControlBar({
                 <IconQr size={16} />
                 邀请他人入会
               </button>
+              <div className="meeting-mobile-menu-items">
+                <button type="button" className="tm-menu-item" onClick={() => { onToggleHand(); setMoreOpen(false) }} disabled={!canPublishData}>
+                  <IconHand size={16} raised={handRaised} />{handRaised ? '放下手' : '举手'}
+                </button>
+                <button type="button" className="tm-menu-item" onClick={() => { onToggleWhiteboard(); setMoreOpen(false) }} disabled={!canPublishData}>
+                  <IconWhiteboard size={16} />{whiteboardOpen ? '关闭白板' : '打开白板'}
+                </button>
+                <button type="button" className="tm-menu-item" onClick={() => { onVirtualBackground(virtualBackground === 'off' ? 'blur' : 'off'); setMoreOpen(false) }} disabled={!canPublish || vbBusy}>
+                  <IconSparkle size={16} />{vbBusy ? '特效处理中' : virtualBackground === 'off' ? '开启背景虚化' : '关闭背景虚化'}
+                </button>
+                {canRecord && <button type="button" className="tm-menu-item" onClick={() => { onToggleRecording(); setMoreOpen(false) }}>
+                  <IconRecord size={16} />{recordingActive ? '停止录制' : '开始录制'}
+                </button>}
+                <div className="meeting-mobile-reactions" aria-label="发送表情">
+                  {REACTION_EMOJIS.map((emoji) => <button key={emoji} type="button" onClick={() => { onReaction(emoji); setMoreOpen(false) }} disabled={!canPublishData} title={`发送 ${emoji}`}>{emoji}</button>)}
+                </div>
+              </div>
               <button
                 type="button"
                 className="tm-menu-item"
@@ -368,6 +390,12 @@ export function ControlBar({
                   录制列表
                 </button>
               )}
+              {onLogout && (
+                <button type="button" className="tm-menu-item" onClick={() => { setMoreOpen(false); void onLogout() }}>
+                  <IconLeave size={16} />
+                  退出登录
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -394,6 +422,7 @@ function ToolButton({
   title,
   label,
   disabled,
+  mobileSecondary,
   children,
 }: {
   active?: boolean
@@ -402,6 +431,7 @@ function ToolButton({
   label: string
   /** 令牌权限不足时置灰（服务端仍会校验，这里只是不让用户白点） */
   disabled?: boolean
+  mobileSecondary?: boolean
   children: React.ReactNode
 }) {
   return (
@@ -410,7 +440,7 @@ function ToolButton({
       onClick={onClick}
       title={title}
       disabled={disabled}
-      className={`tm-tool ${active ? 'tm-tool-active' : ''}`}
+      className={`tm-tool ${mobileSecondary ? 'meeting-mobile-secondary' : ''} ${active ? 'tm-tool-active' : ''}`}
     >
       <span className="shrink-0">{children}</span>
       <span>{label}</span>
