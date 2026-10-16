@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { WhiteboardOp, WhiteboardStroke, WhiteboardTool } from '../lib/protocol'
+import { dotPath, freehandPath, simplify } from '../lib/stroke'
 
 interface WhiteboardProps {
   /** 房间白板内容（来自入会快照 + 服务端广播） */
@@ -97,7 +98,10 @@ export function Whiteboard({ ops, selfId, nameOf, onOp, onClose }: WhiteboardPro
   }
 
   const paintStroke = (ctx: CanvasRenderingContext2D, s: WhiteboardStroke, w: number, h: number) => {
-    const px = s.points.map(([x, y]) => [x * w, y * h] as [number, number])
+    // 抽稀后再画：本地渲染与上报用的是**同一份点**，所以服务端回声回来时笔迹不会跳变。
+    // 顺带让笔迹更平滑（指针采样点比需要的密得多）。
+    const pts = simplify(s.points)
+    const px = pts.map(([x, y]) => [x * w, y * h] as [number, number])
     if (px.length === 0) return
     ctx.save()
     // 橡皮：真正镂空（destination-out），这样底下是"白板"而不是被涂白
@@ -107,6 +111,26 @@ export function Whiteboard({ ops, selfId, nameOf, onOp, onClose }: WhiteboardPro
     ctx.lineCap = 'round'
     ctx.lineJoin = 'round'
     ctx.strokeStyle = s.color
+    ctx.fillStyle = s.color
+
+    // 画笔：用 perfect-freehand 生成墨迹轮廓后填充（Excalidraw 同款做法）
+    if (s.tool === 'pen') {
+      const path = freehandPath({ points: pts, width: s.width, w, h })
+      if (path) {
+        ctx.fill(path)
+      } else if (px.length === 1) {
+        ctx.fill(dotPath(pts[0], s.width, w, h))
+      } else {
+        // 轮廓退化的兜底：仍然把点连起来，绝不把用户的一笔画丢
+        ctx.beginPath()
+        ctx.moveTo(px[0][0], px[0][1])
+        for (let i = 1; i < px.length; i++) ctx.lineTo(px[i][0], px[i][1])
+        ctx.stroke()
+      }
+      ctx.restore()
+      return
+    }
+
     ctx.beginPath()
     if ((s.tool === 'line' || s.tool === 'rect' || s.tool === 'ellipse') && px.length >= 2) {
       const [a, b] = [px[0], px[px.length - 1]]
@@ -244,8 +268,17 @@ export function Whiteboard({ ops, selfId, nameOf, onOp, onClose }: WhiteboardPro
       repaint()
       return
     }
+    // 上报抽稀后的点：与渲染用的是同一份（见 paintStroke），
+    // 一是省带宽，二是保证自己的笔迹在回声到达时不跳变。
+    const simplified: WhiteboardStroke = { ...live, points: simplify(live.points) }
+    live.points = simplified.points
     pendingRef.current.push(live)
-    onOp({ kind: 'stroke', stroke: live })
+    if (import.meta.env.DEV) {
+      // 探针钩子：用来断言确实做了抽稀（生产构建会被摇掉）
+      ;(window as unknown as { __easyliveWhiteboardLastStroke?: number }).__easyliveWhiteboardLastStroke =
+        simplified.points.length
+    }
+    onOp({ kind: 'stroke', stroke: simplified })
     // 兜底：万一服务端没广播回来（被限速或白板已满），2.5s 后把**这一笔**从队列里摘掉，
     // 否则它会永远留在画面上、看起来像"画上去了但其实没提交成功"。
     window.setTimeout(() => {

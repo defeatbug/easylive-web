@@ -10,6 +10,8 @@
  *   新：回声未到  1744 / 1752 / 1722
  */
 import { chromium } from 'playwright-core'
+const results = []
+const check = (n, ok, extra = '') => { results.push([ok, n]); console.log(`  ${ok ? '✅' : '❌'} ${n}${extra ? ' — ' + extra : ''}`) }
 const b = await chromium.launch({
   executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true,
   args: ['--use-fake-ui-for-media-stream','--use-fake-device-for-media-stream','--ignore-certificate-errors','--autoplay-policy=no-user-gesture-required'],
@@ -90,6 +92,24 @@ const okDuring = during.every((n) => n > 50)
 const okAfter = after.every((n) => n > 50)
 console.log(okDuring ? '  → ✅ 待确认期间三笔都在（不会因下一笔而消失）' : '  → ❌ 待确认期间有笔画消失（pending 被覆盖）')
 console.log(okAfter ? '  → ✅ 回声到齐后三笔都在' : '  → ❌ 回声到齐后仍有缺失')
+// ---- 抽稀：上报的点数必须明显少于指针采样次数（否则"变宽墨迹"的平滑度也上不去）----
+await p.evaluate(() => { window.__easyliveWhiteboardDelay = 0; window.__easyliveWhiteboardLastStroke = undefined })
+await p.mouse.move(350, 750)
+await p.mouse.down()
+const moves = []
+for (let i = 0; i <= 40; i++) {
+  // 画一条带抖动的曲线，模拟真实手写（每个采样点都略有偏移）
+  moves.push([350 + i * 12, 750 + Math.sin(i / 3) * 25])
+}
+for (const [x, y] of moves) { await p.mouse.move(x, y); await p.waitForTimeout(12) }
+await p.mouse.up()
+await p.waitForTimeout(900)
+const sent = await p.evaluate(() => window.__easyliveWhiteboardLastStroke ?? -1)
+console.log('  指针采样 %d 次 → 上报 %d 个点', moves.length + 1, sent)
+check('上报前做了抽稀（点数明显少于采样次数）', sent > 1 && sent < (moves.length + 1) * 0.7, `上报 ${sent} 点`)
+
 await p.screenshot({ path: '/tmp/uishot/18-ink-after-fix.png' })
 await b.close()
-process.exit(okDuring && okAfter ? 0 : 1)
+const passed = results.filter(([ok]) => ok).length
+console.log(`\n=== 白板笔迹/抽稀验证：${passed}/${results.length} 通过 ===`)
+process.exit(okDuring && okAfter && passed === results.length ? 0 : 1)

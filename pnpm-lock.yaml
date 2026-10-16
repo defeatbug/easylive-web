@@ -11,6 +11,9 @@ importers:
       '@mediapipe/tasks-vision':
         specifier: ^1.1.0
         version: 1.1.0
+      perfect-freehand:
+        specifier: ^1.2.3
+        version: 1.2.3
       qrcode:
         specifier: ^1.5.4
         version: 1.5.4
@@ -677,6 +680,9 @@ packages:
     resolution: {integrity: sha512-ak9Qy5Q7jYb2Wwcey5Fpvg2KoAc/ZIhLSLOSBmRmygPsGwkVVt0fZa0qrtMz+m6tJTAHfZQ8FnmB4MG4LWy7/w==}
     engines: {node: '>=8'}
 
+  perfect-freehand@1.2.3:
+    resolution: {integrity: sha512-bHZSfqDHGNlPpgH2yxXgPHlQSPpEbo+qg7li0M78J9vNAi2yjwLeA4x79BEQhX44lEWpCLSFCeRZwpw0niiXPA==}
+
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
 
@@ -1220,6 +1226,8 @@ snapshots:
   p-try@2.2.0: {}
 
   path-exists@4.0.0: {}
+
+  perfect-freehand@1.2.3: {}
 
   picocolors@1.1.1: {}
 
