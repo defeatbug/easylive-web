@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { candidateTypeLabel } from '../lib/RoomClient'
 import type { ChatMessage, PeerInfo, SpeakerInfo } from '../lib/protocol'
 import type { LinkStats } from '../lib/RoomClient'
 import { evaluateQuality } from '../lib/quality'
@@ -258,7 +259,7 @@ function StatsView({ stats }: { stats: LinkStats | null }) {
     ['累计丢包', `${stats.packetsLost}`],
     ['上行码率', `${stats.outKbps} kbps`],
     ['下行码率', `${stats.inKbps} kbps`],
-    ['候选类型', stats.candidateType],
+    ['候选类型', `${candidateTypeLabel(stats.candidateType)}（${stats.candidateType || '未知'}）`],
   ]
 
   return (

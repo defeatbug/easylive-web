@@ -38,6 +38,36 @@ export interface LinkStats {
   /** 下行总码率（kbps），用于"我收到多少" */
   inKbps: number
   candidateType: string
+
+}
+
+/**
+ * ICE 候选类型的中文短标签。
+ *
+ * 顶栏只有一行位置，直接打 `host` / `srflx` / `relay` 对中文界面是噪音；
+ * 但这些值本身是有用的诊断信息（relay 说明媒体在走 TURN 中继，带宽与延迟都会更差），
+ * 所以做法是：界面上显示短标签，原始值放进 tooltip，完整解释留在统计面板里。
+ */
+export function candidateTypeLabel(type: string): string {
+  switch (type) {
+    case 'host': return '直连'
+    case 'srflx': return '映射'
+    case 'prflx': return '对端映射'
+    case 'relay': return '中继'
+    case '': return '—'
+    default: return type
+  }
+}
+
+/** tooltip 里的完整说明（保留原始值，方便排查）。 */
+export function candidateTypeHint(type: string): string {
+  const explain: Record<string, string> = {
+    host: '同一局域网内直连',
+    srflx: '经 STUN 得到的公网映射地址',
+    prflx: '对端反射候选',
+    relay: '经 TURN 中继转发（带宽与延迟开销更大）',
+  }
+  return `ICE 候选类型：${type || '未知'}${explain[type] ? `（${explain[type]}）` : ''}`
 }
 
 export interface RoomSnapshot {

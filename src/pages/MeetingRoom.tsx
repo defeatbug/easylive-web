@@ -5,6 +5,7 @@ import type { AccountUser } from '../lib/auth'
 import { RecordingsPanel } from '../components/RecordingsPanel'
 import { Whiteboard } from '../components/Whiteboard'
 import { AudioSink } from '../components/AudioSink'
+import { candidateTypeHint, candidateTypeLabel } from '../lib/RoomClient'
 import { closeAllDetachedWindows } from '../lib/multiWindow'
 import { ShareDialog } from '../components/ShareDialog'
 import { SidePanel } from '../components/SidePanel'
@@ -737,7 +738,10 @@ function StatsInline({ stats }: { stats: LinkStats | null }) {
       <span>丢包 {stats.lossRate}%</span>
       <span>↑{stats.outKbps}</span>
       <span>↓{stats.inKbps}</span>
-      <span className={stats.candidateType === 'relay' ? 'text-amber-400' : ''}>{stats.candidateType}</span>
+      <span
+        className={stats.candidateType === 'relay' ? 'text-amber-400' : ''}
+        title={candidateTypeHint(stats.candidateType)}
+      >{candidateTypeLabel(stats.candidateType)}</span>
     </span>
   )
 }
