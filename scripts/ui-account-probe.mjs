@@ -10,6 +10,10 @@
  *   5. Escape 关闭、焦点不逃出弹窗、关闭后焦点归还
  *   6. 退出登录后回到登录页
  *   7. 窄屏下弹窗不溢出视口
+ *   8. 注册：模式切换、前端校验、注册即登录、重复用户名被拒
+ *
+ * 注意：第 8 段会真的在数据库里建一个 `probe*` 账号（注册没有自助删除接口），
+ * 每次运行都会新增一个。它只影响开发库，需要时按前缀清理 `users` 表即可。
  *
  * 用法（前后端都起好后）：
  *   node scripts/ui-account-probe.mjs
@@ -103,6 +107,12 @@ console.log('\n=== A. 未登录时首页 = 登录页 ===')
   // ---------- B. 登录 → 会前页 ----------
   console.log('\n=== B. 登录进入会前页 ===')
   await signIn(page)
+  // 先等左下角身份入口渲染出内容（首字母或头像）：只等 .prejoin-shell 会在文本提交前
+  // 就读到空值，detail 里冒出"左下角文字="这种误导性输出（实测出现过）。
+  await page.waitForFunction(() => {
+    const b = document.querySelector('button.prejoin-rail-bottom')
+    return !!b && (b.textContent?.trim().length ?? 0) > 0
+  }, { timeout: 8000 }).catch(() => {})
   const afterLogin = await page.evaluate(() => ({
     railBottom: !!document.querySelector('button.prejoin-rail-bottom'),
     accountChip: !!document.querySelector('button.prejoin-account'),
@@ -245,6 +255,111 @@ console.log('\n=== H. 窄屏（375×720） ===')
   })
   check('弹窗未横向溢出', r.left >= -1 && r.right <= r.vw + 1, `left=${Math.round(r.left)} right=${Math.round(r.right)} vw=${r.vw}`)
   check('弹窗未纵向溢出', r.top >= -1 && r.bottom <= r.vh + 1, `top=${Math.round(r.top)} bottom=${Math.round(r.bottom)} vh=${r.vh}`)
+  await browser.close()
+}
+
+// ---------- I. 注册 ----------
+console.log('\n=== I. 注册 ===')
+{
+  const newUser = `probe${Date.now().toString(36)}`
+  const newPass = 'probe-pass-2026'
+  const { browser, page } = await launch({ width: 1440, height: 900 })
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('#login-heading', { timeout: 15000 })
+
+  const modes = await page.evaluate(() => {
+    const btns = [...document.querySelectorAll('.login-mode')]
+    return {
+      labels: btns.map((b) => b.textContent.trim()),
+      active: btns.find((b) => b.classList.contains('is-active'))?.textContent?.trim() ?? '',
+      hasRemember: !!document.querySelector('.login-remember'),
+    }
+  })
+  check('登录页有登录/注册切换', modes.labels.join('/') === '登录/注册', modes.labels.join('/'))
+  check('默认停在登录模式', modes.active === '登录' && modes.hasRemember, `active=${modes.active}`)
+
+  await page.locator('.login-mode').nth(1).click()
+  await page.waitForTimeout(250)
+  const signupFields = await page.evaluate(() => ({
+    hasNickname: !!document.querySelector('input[autocomplete="nickname"]'),
+    passwordCount: document.querySelectorAll('input[autocomplete="new-password"]').length,
+    hasRemember: !!document.querySelector('.login-remember'),
+    submit: document.querySelector('button[type="submit"]')?.textContent?.trim() ?? '',
+  }))
+  check('注册模式出现昵称与确认密码', signupFields.hasNickname && signupFields.passwordCount === 2,
+    `昵称=${signupFields.hasNickname} 密码框=${signupFields.passwordCount}`)
+  check('注册模式不显示"记住用户名"', signupFields.hasRemember === false)
+  check('按钮文案变为创建账号', signupFields.submit.includes('创建账号'), signupFields.submit)
+
+  const pw = page.locator('input[autocomplete="new-password"]')
+  // 密码太短
+  await page.fill('input[autocomplete="username"]', newUser)
+  await pw.nth(0).fill('short')
+  await pw.nth(1).fill('short')
+  await page.click('button[type="submit"]')
+  await page.waitForTimeout(400)
+  const shortErr = (await page.locator('#login-error').textContent()) ?? ''
+  check('密码太短被拦下', shortErr.includes('至少'), shortErr)
+
+  // 两次输入不一致
+  await pw.nth(0).fill(newPass)
+  await pw.nth(1).fill(`${newPass}x`)
+  await page.click('button[type="submit"]')
+  await page.waitForTimeout(400)
+  const mismatch = (await page.locator('#login-error').textContent()) ?? ''
+  check('两次密码不一致被拦下', mismatch.includes('不一致'), mismatch)
+
+  // 正常注册 → 应当直接进入会前页（注册即登录）
+  await page.fill('input[autocomplete="nickname"]', '探针新用户')
+  await pw.nth(1).fill(newPass)
+  await page.click('button[type="submit"]')
+  await page.waitForSelector('.prejoin-shell', { timeout: 20000 })
+  const landed = await page.evaluate(() => !!document.querySelector('.prejoin-shell'))
+  check('注册成功后直接进入会前页（注册即登录）', landed)
+
+  const role = (await page.locator('.prejoin-account small').textContent())?.trim() ?? ''
+  check('新账号是普通成员', role === '成员', role)
+  await browser.close()
+
+  // 同一用户名再次注册 → 409
+  const dup = await launch({ width: 1440, height: 900 })
+  await dup.page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' })
+  await dup.page.waitForSelector('#login-heading', { timeout: 15000 })
+  await dup.page.locator('.login-mode').nth(1).click()
+  await dup.page.fill('input[autocomplete="username"]', newUser)
+  const dpw = dup.page.locator('input[autocomplete="new-password"]')
+  await dpw.nth(0).fill(newPass)
+  await dpw.nth(1).fill(newPass)
+  await dup.page.click('button[type="submit"]')
+  await dup.page.waitForTimeout(1200)
+  const dupErr = (await dup.page.locator('#login-error').textContent()) ?? ''
+  check('重复用户名注册被拒（409）', dupErr.includes('已被占用'), dupErr)
+  await dup.browser.close()
+
+  console.log(`  ℹ️  本次注册的测试账号：${newUser}（探针不自动删除）`)
+}
+
+// ---------- J. 服务端关闭注册时，前端不该出现注册入口 ----------
+console.log('\n=== J. 关闭注册时不显示注册入口 ===')
+{
+  const { browser, page } = await launch({ width: 1440, height: 900 })
+  // 拦截能力查询来模拟"部署未开放注册"：比另起一套后端便宜得多，
+  // 而且这里锁定的正是前端自己的行为（后端 403 已由接口层覆盖）。
+  await page.route('**/auth/capabilities', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ authEnabled: true, signupEnabled: false }),
+  }))
+  await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('#login-heading', { timeout: 15000 })
+  await page.waitForTimeout(900) // 等能力查询回填
+  const s = await page.evaluate(() => ({
+    modes: document.querySelectorAll('.login-mode').length,
+    hasLoginForm: !!document.querySelector('input[autocomplete="username"]'),
+    hasRemember: !!document.querySelector('.login-remember'),
+  }))
+  check('关闭注册时不渲染登录/注册切换', s.modes === 0, `切换按钮数=${s.modes}`)
+  check('登录表单本身仍可用', s.hasLoginForm && s.hasRemember)
   await browser.close()
 }
 

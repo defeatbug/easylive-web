@@ -119,6 +119,60 @@ export async function signOut(): Promise<void> {
   if (response.status !== 204) throw new Error(`退出登录失败（HTTP ${response.status}），请重试。`)
 }
 
+/** 这个部署"能做什么"：是否启用登录、是否开放注册。 */
+export interface AuthCapabilities {
+  authEnabled: boolean
+  signupEnabled: boolean
+}
+
+/**
+ * 查询部署能力，用于决定要不要显示注册入口。
+ *
+ * 刻意不抛错：这是"锦上添花"的一次查询，失败时应当退回到"不显示注册入口"
+ * （注册表单本来也提交不了），而不是把整个登录页变成错误页。
+ */
+export async function fetchAuthCapabilities(): Promise<AuthCapabilities> {
+  try {
+    const response = await fetch('/auth/capabilities', { credentials: 'include', cache: 'no-store' })
+    if (response.ok) {
+      const data = (await response.json()) as Partial<AuthCapabilities>
+      return { authEnabled: data.authEnabled === true, signupEnabled: data.signupEnabled === true }
+    }
+  } catch {
+    // 网络不通：按最保守的答案处理
+  }
+  return { authEnabled: false, signupEnabled: false }
+}
+
+/**
+ * 自助注册。成功后后端会直接下发会话（注册即登录），所以调用方拿到用户即已登录。
+ *
+ * 与登录一样，错误文案优先用后端返回的那一句：是否开放注册、用户名是否被占用、
+ * 口令强度要求都由服务端判定，前端不重复维护一套口径。
+ */
+export async function signUp(input: {
+  username: string
+  password: string
+  displayName?: string
+}): Promise<AccountUser> {
+  let response: Response
+  try {
+    response = await fetch('/auth/register', {
+      method: 'POST', credentials: 'include', cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: input.username.trim(),
+        password: input.password,
+        displayName: input.displayName?.trim() ?? '',
+      }),
+    })
+  } catch {
+    throw new Error('无法连接登录服务，请检查网络后重试。')
+  }
+  if (response.ok) return readUser(response)
+  throw await readError(response, '注册失败')
+}
+
 // ------------------------------------------------------------------
 // 账号资料：昵称 / 用户名 / 密码 / 头像
 //

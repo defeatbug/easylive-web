@@ -782,14 +782,22 @@ body {
 .login-overline { margin-top:34px; color:#1768ee; font-size:10px; font-weight:800; letter-spacing:.17em; }
 .login-panel h2 { margin:11px 0 8px; font-size:35px; font-weight:760; letter-spacing:-.05em; }
 .login-intro { color:#8593a8; font-size:14px; }
+/* 登录 / 注册切换：分段控件。只有服务端开放注册时才会渲染（见 /auth/capabilities） */
+.login-modes { display:flex; gap:4px; margin-top:24px; padding:4px; border-radius:11px; background:#f1f5fa; }
+.login-mode { flex:1; height:38px; border:0; border-radius:8px; background:transparent; color:#6b7a90; font-size:13px; font-weight:650; cursor:pointer; transition:background .16s,color .16s,box-shadow .16s; }
+.login-mode:hover:not(:disabled):not(.is-active) { color:#1768ee; }
+.login-mode.is-active { background:#fff; color:#1768ee; box-shadow:0 2px 8px rgba(23,104,238,.14); }
+.login-mode:disabled { opacity:.6; cursor:wait; }
 .login-invite { display:flex; flex-wrap:wrap; align-items:center; gap:7px; margin-top:25px; padding:11px 13px; border-radius:10px; background:#edf5ff; color:#3a68a9; font-size:12px; }
 .login-invite strong { max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#1768ee; }
 /* 开发预览提示：只在 #/dev/login 出现，用中性色而不是品牌色，避免被当成正式功能 */
 .login-preview { display:flex; align-items:flex-start; gap:8px; margin-top:20px; padding:10px 12px; border:1px dashed #d5dded; border-radius:10px; background:#f8fafc; color:#6b7a90; font-size:11px; line-height:1.6; }
 .login-preview svg { flex:none; margin-top:1px; color:#8494ab; }
 .login-form { display:grid; gap:20px; margin-top:43px; }
-.login-invite + .login-form,.login-preview + .login-form { margin-top:28px; }
+.login-invite + .login-form,.login-preview + .login-form,.login-modes + .login-form { margin-top:28px; }
 .login-field { display:grid; gap:10px; color:#3b4b64; font-size:12px; font-weight:650; }
+/* 字段名后面的补充说明（"选填"、"至少 8 个字符"）：弱化但不隐藏 */
+.login-field > span small { margin-left:6px; color:#a2aebe; font-size:10px; font-weight:400; }
 .login-input-wrap { position:relative; display:flex; align-items:center; }
 .login-input-icon { position:absolute; left:14px; display:flex; align-items:center; color:#9aa8bd; pointer-events:none; transition:color .16s; z-index:1; }
 .login-input-wrap > input { width:100%; height:52px; padding:0 15px 0 44px; border:1px solid #dce5f1; border-radius:10px; outline:none; background:#f8fafd; color:#1b2840; font-size:14px; font-weight:500; transition:border-color .16s,box-shadow .16s,background .16s; }

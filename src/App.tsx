@@ -2,7 +2,7 @@ import { Suspense, lazy, useEffect, useState } from 'react'
 import { JoinPage, type JoinRequest } from './pages/JoinPage'
 import { LoginPage } from './pages/LoginPage'
 import { MeetingRoom } from './pages/MeetingRoom'
-import { restoreAuth, signIn, signOut, type AccountUser, type AuthSession } from './lib/auth'
+import { restoreAuth, signIn, signOut, signUp, type AccountUser, type AuthSession } from './lib/auth'
 
 const MetricsPage = lazy(() => import('./pages/MetricsPage').then((m) => ({ default: m.MetricsPage })))
 const SESSION_KEY = 'easylive.session'
@@ -80,13 +80,21 @@ export default function App() {
     }
   }, [auth, session, matchingSession])
 
-  const login = async (username: string, password: string): Promise<AccountUser> => {
-    const user = await signIn(username, password)
+  /**
+   * 登录与注册成功后的收尾完全一样：丢掉上一个账号的会议记录，写入新的登录态。
+   * 抽出来是因为注册接口也是"注册即登录"，两条路径的收尾必须严格一致——
+   * 否则会出现"登录后会议记录清干净了、注册后却残留着上一个账号的房间号"。
+   */
+  const applySignedIn = (user: AccountUser): AccountUser => {
     if (session) clearMeeting(session.roomId)
     setSession(null)
     setAuth({ status: 'signed-in', user })
     return user
   }
+  const login = async (username: string, password: string): Promise<AccountUser> =>
+    applySignedIn(await signIn(username, password))
+  const register = async (input: { username: string; password: string; displayName: string }): Promise<AccountUser> =>
+    applySignedIn(await signUp(input))
   /** 账号资料变更（昵称/用户名/头像）后同步到全局登录态，顶栏与会前页随之刷新。 */
   const updateUser = (user: AccountUser) => {
     setAuth((current) => (current.status === 'signed-in' ? { status: 'signed-in', user } : current))
@@ -127,8 +135,13 @@ export default function App() {
         window.location.hash = ''
         return user
       }}
+      onRegister={async (input) => {
+        const user = await register(input)
+        window.location.hash = ''
+        return user
+      }}
       invitedRoom={invitedRoom}
-      previewNotice="开发预览：这条路由只强制显示登录页，提交仍会真实调用 /auth/login。"
+      previewNotice="开发预览：这条路由只强制显示登录页，提交仍会真实调用 /auth/login 与 /auth/register。"
     />
   }
   if (auth.status === 'checking' || auth.status === 'error') {
@@ -139,7 +152,7 @@ export default function App() {
     </div></div>
   }
   if (auth.status === 'signed-out') {
-    return <LoginPage onLogin={login} invitedRoom={invitedRoom} />
+    return <LoginPage onLogin={login} onRegister={register} invitedRoom={invitedRoom} />
   }
   if (hash === '#/metrics') {
     return <Suspense fallback={<div className="p-6 text-sm text-neutral-400">正在加载指标报表…</div>}>
