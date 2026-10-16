@@ -11,6 +11,10 @@
  *   node scripts/ui-probe.mjs
  *   PROBE_URL=https://localhost:5173 PROBE_API=http://localhost:8080 node scripts/ui-probe.mjs
  *
+ * 鉴权：AUTH_MODE=required 时首页是登录页，探针会先自动登录再继续
+ * （账号可用 PROBE_USER / PROBE_PASS 覆盖，默认 teacher / easylive-demo-2026）；
+ * AUTH_MODE=off 时这一步自动跳过，同一套探针两种模式都能跑。
+ *
  * 覆盖的回归点：
  *   1. 会前页点麦克风/摄像头**不会**提交表单（<button> 在 form 内默认是 submit）
  *   2. 摄像头开关能真正切换预览显隐
@@ -64,7 +68,26 @@ const launch = (extraArgs, permissions) =>
     return { browser, ctx, page: await ctx.newPage() }
   })
 
+const PROBE_USER = process.env.PROBE_USER ?? 'teacher'
+const PROBE_PASS = process.env.PROBE_PASS ?? 'easylive-demo-2026'
+
+/**
+ * AUTH_MODE=required 时首页是**登录页**而不是会前页，这里先把它登过去。
+ * AUTH_MODE=off 时登录页不会出现，本函数是空操作 —— 两种模式都能跑同一套探针。
+ */
+const signInIfNeeded = async (page) => {
+  // 等到"登录页或会前页"其中之一出现，避免在 React 挂载完成前就下判断
+  await page.waitForSelector('input[autocomplete="username"], .prejoin-shell', { timeout: 20000 })
+  const login = await page.$('input[autocomplete="username"]')
+  if (!login) return
+  await login.fill(PROBE_USER)
+  await page.fill('input[autocomplete="current-password"]', PROBE_PASS)
+  await page.click('button[type="submit"]')
+  await page.waitForSelector('.prejoin-shell', { timeout: 20000 })
+}
+
 const fillJoinForm = async (page, room, name) => {
+  await signInIfNeeded(page)
   await page.waitForSelector('form', { timeout: 15000 })
   const inputs = await page.$$('form input[type="text"], form input:not([type])')
   await inputs[0].fill(room)
@@ -208,6 +231,7 @@ console.log('\n=== D. 双人远端画面 ===')
   const launchPair = async (name) => {
     const { browser, page } = await launch(['--use-fake-ui-for-media-stream'], ['camera', 'microphone'])
     await page.goto(PAGE_URL, { waitUntil: 'domcontentloaded' })
+    await signInIfNeeded(page)
     await page.waitForSelector('form', { timeout: 20000 })
     const inputs = await page.$$('form input[type="text"], form input:not([type])')
     await inputs[0].fill(room)
@@ -223,21 +247,33 @@ console.log('\n=== D. 双人远端画面 ===')
   await second.page.waitForTimeout(15000)
 
   // 远端瓦片 = 页面上第二个 <video>（第一个是本地）；用 readyState 与尺寸判断是否真在播
+  // 判定"远端画面在播"。
+  //
+  // 以前用 `[data-local-tile]` 这个 DOM 钩子去区分本地/远端，但那个属性**从来没存在过**，
+  // 于是永远走 fallback（取最后一个 <video>）——布局一变就会偶发抓到没画面的元素，
+  // 表现为"偶发失败"。现在改为不依赖任何自定义属性：
+  // 本地预览必然占一个在播的 video，所以"**有两个以上**在播的 video"就说明远端也出画面了。
   const remotePlaying = async (page) =>
     page.evaluate(() => {
       const vids = [...document.querySelectorAll('video')]
-      const remote = vids.find((v) => !v.closest('[data-local-tile]')) ?? vids[vids.length - 1]
-      return { count: vids.length, w: remote?.videoWidth ?? 0, readyState: remote?.readyState ?? 0 }
+      const playing = vids.filter((v) => (v.videoWidth ?? 0) > 0 && v.readyState >= 2)
+      const best = playing.reduce((a, b) => ((b.videoWidth ?? 0) > (a?.videoWidth ?? 0) ? b : a), null)
+      return {
+        count: vids.length,
+        playing: playing.length,
+        w: best?.videoWidth ?? 0,
+        readyState: best?.readyState ?? 0,
+      }
     })
 
   const a1 = await remotePlaying(first.page)
   await first.page.waitForTimeout(4000)
   const a2 = await remotePlaying(first.page)
-  check('甲 能看到 乙 的画面（远端瓦片在播）', a2.w > 0 && a2.readyState >= 2, `w=${a2.w} readyState=${a2.readyState}`)
+  check('甲 能看到 乙 的画面（远端瓦片在播）', a2.playing >= 2 && a2.w > 0, `在播=${a2.playing} w=${a2.w}`)
   check('远端画面持续在播（不是只播了开头一小段就冻结）', a2.readyState >= 2 && a1.count === a2.count)
 
   const b = await remotePlaying(second.page)
-  check('乙 能看到 甲 的画面（远端瓦片在播）', b.w > 0 && b.readyState >= 2, `w=${b.w} readyState=${b.readyState}`)
+  check('乙 能看到 甲 的画面（远端瓦片在播）', b.playing >= 2 && b.w > 0, `在播=${b.playing} w=${b.w}`)
 
   await first.browser.close()
   await second.browser.close()
