@@ -72,6 +72,16 @@ check('面板列出会话与文件（含大小/时长）', /画面|声音/.test(
 check('面板给出转码命令入口', panelText.includes('复制转码命令'))
 await p.screenshot({ path: '/tmp/uishot/12-recording-list.png' })
 
+// ---- 回归：刷新后主持人身份不能丢 ----
+// 以前 loadSession() 没有恢复 asAdmin，刷新会把主持人悄悄降级成普通参会者，
+// 表现是"录制按钮消失了"，很难联想到是刷新导致的。
+await p.reload({ waitUntil: 'domcontentloaded' })
+await p.waitForTimeout(6000)
+const afterReload = await p.locator('button', { hasText: /^录制$/ }).count()
+check('刷新后主持人身份保留（录制按钮仍在）', afterReload > 0, `按钮数 ${afterReload}`)
+const grants = await p.evaluate(() => window.__easyliveDebugSnapshot?.()?.grants ?? null)
+check('刷新后权限来自服务端（roomAdmin=true）', grants?.roomAdmin === true, JSON.stringify(grants))
+
 await b.close()
 const pass = results.filter(([ok]) => ok).length
 console.log(`\n=== 录制验证：${pass}/${results.length} 通过 ===`)

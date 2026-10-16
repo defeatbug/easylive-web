@@ -74,10 +74,19 @@ export function useRoom(active: boolean, roomId: string, displayName: string, jo
 
       void (async () => {
         try {
-          // 先申请令牌：服务端 AUTH_MODE=off 时 /token 返回 501，这里拿到 null，
-          // 照常以无令牌方式入会（保证本地演示开箱可用）。
-          const who = identity ?? displayName
-          const token = await fetchToken({ roomId, identity: who, name: displayName, roomAdmin: asAdmin })
+          // 先申请令牌，并**区分三种结果**：
+          //   off   → 服务端未启用鉴权，正常以无令牌入会（本地演示开箱可用）；
+          //   error → 真失败（密钥缺失/401/网络等）：明确报错并中止，绝不静默当成"无需令牌"，
+          //           那会让用户进入一个没权限、也没有任何提示的会议。
+          // 令牌身份：优先用调用方传入的 identity（生产上来自登录），否则退回昵称
+          // （无鉴权模式下两者等价，所以本地演示不需要额外的身份来源）。
+          const who = identity || displayName
+          const tokenRes = await fetchToken({ roomId, identity: who, name: displayName, roomAdmin: asAdmin })
+          if (tokenRes.status === 'error') {
+            setLocalError(tokenRes.message)
+            return
+          }
+          const token = tokenRes.status === 'ok' ? tokenRes.token : null
           // ICE 配置与令牌并行取（两者互不依赖），减少入会前的等待
           const iceServers = await fetchICEServers(who)
           // 关键：await 之后必须重新检查 cancelled，否则 StrictMode 下会留下"僵尸连接"

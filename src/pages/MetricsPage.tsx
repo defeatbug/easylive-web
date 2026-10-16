@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { fetchRecordings, formatBytes, type RecordingsResponse } from '../lib/recordings'
 
 /**
@@ -60,7 +60,9 @@ interface TrackRow {
   recording: boolean
 }
 
-const REFRESH_MS = 3000
+// 实时指标 5 秒一次（原来 3 秒）；录制列表**不参与轮询**——它几乎不变，
+// 每 3 秒拉一次纯属浪费（录制文件目录可能很大）。改为进入时加载 + 手动刷新。
+const REFRESH_MS = 5000
 
 export function MetricsPage({ onBack }: { onBack: () => void }) {
   const [minutes, setMinutes] = useState(30)
@@ -73,15 +75,13 @@ export function MetricsPage({ onBack }: { onBack: () => void }) {
     let alive = true
     const tick = async () => {
       try {
-        const [o, t, r] = await Promise.all([
+        const [o, t] = await Promise.all([
           fetch(`/metrics/overview?minutes=${minutes}&bucket=5`).then((x) => x.json()),
           fetch('/metrics/tracks').then((x) => x.json()),
-          fetchRecordings().catch(() => null),
         ])
         if (!alive) return
         setOverview(o as Overview)
         setTracks(((t as { tracks?: TrackRow[] }).tracks ?? []) as TrackRow[])
-        setRecs(r)
         setErr(null)
       } catch (e) {
         if (alive) setErr(e instanceof Error ? e.message : String(e))
@@ -94,6 +94,20 @@ export function MetricsPage({ onBack }: { onBack: () => void }) {
       window.clearInterval(id)
     }
   }, [minutes])
+
+  // 录制列表独立加载：它几乎不变，不参与高频轮询（录制目录可能很大，
+  // 每几秒拉一次纯属浪费）。进入页面时加载一次，需要时点"刷新"。
+  const loadRecordings = useCallback(async () => {
+    try {
+      setRecs(await fetchRecordings())
+    } catch {
+      /* 录制能力未开启时接口会报错，报表页不该因此整体失败 */
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadRecordings()
+  }, [loadRecordings])
 
   const live = overview?.live
   const history = overview?.history ?? []
@@ -230,7 +244,8 @@ export function MetricsPage({ onBack }: { onBack: () => void }) {
 
       {/* 录制 */}
       <section className="mx-auto mt-4 max-w-6xl pb-8">
-        <h2 className="mb-2 text-sm font-semibold">录制产物</h2>
+        <h2 className="mb-2 text-sm font-semibold">录制产物  <button className="text-[11px] font-normal text-[var(--brand)] underline" onClick={() => void loadRecordings()}>刷新</button>
+        </h2>
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Kpi label="录制会话" value={recs?.sessions?.length ?? '—'} />
           <Kpi label="文件数" value={recFiles.length || '—'} />

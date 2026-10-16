@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { Suspense, lazy, useEffect, useState } from 'react'
 import { JoinPage, type JoinRequest } from './pages/JoinPage'
 import { MeetingRoom } from './pages/MeetingRoom'
-import { MetricsPage } from './pages/MetricsPage'
+// 报表页懒加载：它不是入会必需模块，单独切一个 chunk，主包更小
+const MetricsPage = lazy(() => import('./pages/MetricsPage').then((m) => ({ default: m.MetricsPage })))
 
 /**
  * 只有一个状态：当前是否在会议中。
@@ -25,6 +26,11 @@ function loadSession(): JoinRequest | null {
       camId: parsed.camId,
       micOn: parsed.micOn ?? true,
       camOn: parsed.camOn ?? true,
+        // 刷新前是不是主持人也要恢复：以前这里漏了 asAdmin，于是刷新会把主持人悄悄
+        // 降级成普通参会者（表现是录制/管理按钮消失，很难联想到是刷新导致的）。
+        // 注意这只是**演示模式**下的体验修复：正式鉴权上线后权限必须来自新令牌，
+        // 而不是本地存储——本地存储是用户可改的。
+        asAdmin: parsed.asAdmin ?? false,
     }
   } catch {
     return null
@@ -42,7 +48,11 @@ export default function App() {
   const [session, setSession] = useState<JoinRequest | null>(loadSession)
 
   if (hash === '#/metrics') {
-    return <MetricsPage onBack={() => { window.location.hash = '' }} />
+    return (
+      <Suspense fallback={<div className="p-6 text-sm text-neutral-400">正在加载指标报表…</div>}>
+        <MetricsPage onBack={() => { window.location.hash = '' }} />
+      </Suspense>
+    )
   }
 
   const join = (req: JoinRequest) => {
