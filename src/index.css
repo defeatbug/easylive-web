@@ -844,3 +844,27 @@ body {
 @media (max-width:720px) { .login-shell { padding:0; background:#fff; } .login-layout { display:block; min-height:100vh; border:0; border-radius:0; box-shadow:none; } .login-story { display:none; } .login-panel { min-height:100vh; padding:30px 24px 24px; } .login-mobile-brand { display:block; margin-bottom:65px; font-size:25px; font-weight:800; letter-spacing:-.07em; } .login-panel-inner { margin:auto; } .login-panel-footer { margin-top:70px; } }
 @media (max-width:380px) { .login-mobile-brand { margin-bottom:40px; } .login-panel h2 { font-size:31px; } .login-form { margin-top:32px; } }
 @media (prefers-reduced-motion:reduce) { .login-shell button,.login-shell input { transition-duration:.01ms !important; } }
+
+/* ---------- 弹幕与互动动效 ---------- */
+
+/* 弹幕：从底栏上方淡入，停留由 RoomClient 的定时器控制 */
+.danmaku-item { animation: danmaku-in .26s ease-out; }
+@keyframes danmaku-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* 互动动效：从底栏往上弹约 50px，然后淡出（对齐腾讯会议那种"弹一下"的手感） */
+.action-pop { transform: translateX(-50%); animation: action-pop 1.5s ease-out forwards; }
+@keyframes action-pop {
+  0%   { opacity: 0; transform: translate(-50%, 8px) scale(.6); }
+  30%  { opacity: 1; transform: translate(-50%, -50px) scale(1.25); }
+  70%  { opacity: 1; transform: translate(-50%, -50px) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -62px) scale(1); }
+}
+
+/* 尊重"减少动态效果"：关掉动画，但消息仍然要看得见 */
+@media (prefers-reduced-motion: reduce) {
+  .danmaku-item, .action-pop { animation: none; }
+  .action-pop { opacity: 1; transform: translate(-50%, -50px); }
+}

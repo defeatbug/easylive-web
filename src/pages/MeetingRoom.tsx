@@ -31,6 +31,8 @@ interface MeetingRoomProps {
 }
 
 interface Tile {
+  /** 已设置头像时用它替代首字母（服务端下发） */
+  avatarUrl?: string
   key: string
   label: string
   stream: MediaStream | null
@@ -121,6 +123,7 @@ export function MeetingRoom({
     out.push({
       key: 'local',
       label: `${displayName}（我）`,
+      avatarUrl: user?.avatarUrl,
       stream: snapshot.camEnabled ? snapshot.localStream : null,
       isLocal: true,
       screen: false,
@@ -154,6 +157,7 @@ export function MeetingRoom({
       out.push({
         key: `cam-${p.id}`,
         label: p.name,
+        avatarUrl: p.avatarUrl,
         // 摄像头被对方关掉时给 null，让瓦片显示头像而不是黑屏
         stream: cam && !cam.muted ? (snapshot.remoteStreams[cam.id] ?? null) : null,
         isLocal: false,
@@ -190,6 +194,12 @@ export function MeetingRoom({
   const hasScreen = screenTiles.length > 0
 
   // 主舞台：手动选中的优先；否则有人共享就默认给屏幕，没人共享就用第一张
+  // 三类瞬时消息分开渲染（都来自同一条 reaction 消息）：
+  //   flashes = 带文字的弹幕；actions = 互动动效；plainReactions = 角落里的表情浮层
+  const flashes = snapshot.reactions.filter((r) => r.text)
+  const actions = snapshot.reactions.filter((r) => !r.text && r.kind === 'action')
+  const plainReactions = snapshot.reactions.filter((r) => !r.text && r.kind !== 'action')
+
   const activeTile =
     tiles.find((t) => t.key === activeKey) ?? screenTiles[0] ?? tiles[0] ?? null
   const quality = evaluateQuality(snapshot.stats)
@@ -318,9 +328,9 @@ export function MeetingRoom({
       <div className="meeting-body relative flex min-h-0 flex-1">
         <main className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden">
           {/* 表情浮层：绝对定位、不参与排版、不拦截鼠标 */}
-          {snapshot.reactions.length > 0 && (
+          {plainReactions.length > 0 && (
             <div className="pointer-events-none absolute bottom-28 left-4 z-10 flex flex-col-reverse gap-2">
-              {snapshot.reactions.map((r) => (
+              {plainReactions.map((r) => (
                 <div
                   key={r.id}
                   className="reaction-float flex items-center gap-2 rounded-full bg-black/65 px-3 py-1.5 shadow-lg"
@@ -333,6 +343,38 @@ export function MeetingRoom({
               ))}
             </div>
           )}
+
+          {/*
+            弹幕：贴着底栏上方滚一条，左边是"谁发的"（自己发就显示"我"），
+            中间是表情，右边是文字。6 秒后由 RoomClient 自动移除。
+          */}
+          {flashes.length > 0 && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-24 z-20 flex flex-col items-center gap-1.5 px-6">
+              {flashes.map((r) => (
+                <div
+                  key={r.id}
+                  className="danmaku-item max-w-[86%] truncate rounded-full bg-black/70 px-3.5 py-1.5 text-xs text-white/90 shadow-lg"
+                >
+                  <span className="mr-1.5 font-medium text-[var(--brand)]">
+                    {r.fromId === snapshot.self?.id ? '我' : r.fromName}
+                  </span>
+                  <span className="mr-1.5">{r.emoji}</span>
+                  {r.text}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* 互动动效：小红花从底栏上方弹起约 50px 再淡出 */}
+          {actions.map((r) => (
+            <div
+              key={r.id}
+              className="action-pop pointer-events-none absolute bottom-20 left-1/2 z-20 text-3xl"
+              aria-hidden="true"
+            >
+              {r.emoji}
+            </div>
+          ))}
 
           <div className="meeting-stage min-h-0 flex-1 overflow-y-auto px-4 pb-24">
             {tiles.length === 0 ? (
@@ -411,7 +453,9 @@ export function MeetingRoom({
             vbBusy={snapshot.virtualBackgroundBusy}
             onVirtualBackground={(m) => void client?.setVirtualBackground(m)}
             onToggleHand={() => client?.toggleHand()}
-            onReaction={(emoji) => client?.sendReaction(emoji)}
+            // 三个参数都要透传：只传 emoji 的话，弹幕文字与互动 kind 会被丢掉。
+            // 表现是"点互动没反应、发弹幕不显示"，而服务端日志一切正常——很难查。
+            onReaction={(emoji, text, kind) => client?.sendReaction(emoji, text, kind)}
             onLeave={() => {
               closeAllDetachedWindows()
               client?.leave()
@@ -500,6 +544,7 @@ function GridView({ tiles }: { tiles: Tile[] }) {
           key={t.key}
           stream={t.stream}
           label={t.label}
+          avatarUrl={t.avatarUrl}
           mirrored={t.isLocal && !t.screen}
           muted={t.muted}
           badge={t.badge}
@@ -602,6 +647,7 @@ function StageWithPip({
       <VideoTile
         stream={stage.stream}
         label={stage.label}
+        avatarUrl={stage.avatarUrl}
         screen={stage.screen}
         mirrored={stage.isLocal && !stage.screen}
         muted={stage.muted}

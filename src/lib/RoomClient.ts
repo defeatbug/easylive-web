@@ -1177,14 +1177,23 @@ export class RoomClient {
     }
   }
 
-  /** 发一个表情。本地立即回显（服务端只中继给其他人），避免自己看不到自己的表情。 */
-  sendReaction(emoji: string) {
+  /**
+   * 发一个表情 / 弹幕 / 互动动效。本地立即回显（服务端只中继给其他人），
+   * 避免自己看不到自己发的东西。
+   *
+   * 三者共用 type='reaction' 一条消息：
+   *   · 只有 emoji     → 角落里的表情浮层
+   *   · emoji + text   → 弹幕（底栏上方滚一条"谁：说了什么"）
+   *   · kind='action'  → 互动动效（从底栏往上弹一下）
+   */
+  sendReaction(emoji: string, text?: string, kind?: 'action') {
     // 表情是瞬时事件，只走数据面；发不出去时明确告知，避免"点了没反应"
-    if (!this.sendData({ type: 'reaction', emoji })) {
+    if (!this.sendData({ type: 'reaction', emoji, text, kind })) {
       this.update({ notice: '数据通道尚未就绪，表情未发送（稍后重试或刷新页面）' })
       return
     }
-    this.pushReaction(this.snapshot.self?.id ?? 'me', emoji)
+    // 自己发的名字直接写"我"：本地不一定有自己的 participant 记录
+    this.pushReaction(this.snapshot.self?.id ?? 'me', emoji, text, kind, '我')
   }
 
   /**
@@ -1278,19 +1287,23 @@ export class RoomClient {
     }
   }
 
-  private pushReaction(fromId: string, emoji: string) {
+  private pushReaction(fromId: string, emoji: string, text?: string, kind?: 'action', fromName?: string) {
     const item: Reaction = {
       id: crypto.randomUUID(),
       fromId,
-      fromName: this.snapshot.participants.find((p) => p.id === fromId)?.name ?? '我',
+      fromName: fromName ?? this.snapshot.participants.find((p) => p.id === fromId)?.name ?? '我',
       emoji,
       at: Date.now(),
+      text,
+      kind,
     }
+    // 带文字的当弹幕显示，读起来要点时间，所以留久一点（6s vs 3.2s）
+    const ttl = text ? 6000 : 3200
     this.update({ reactions: [...this.snapshot.reactions, item].slice(-12) })
-    // 3.2 秒后自动移除，UI 不需要额外的重绘定时器
+    // 到期自动移除，UI 不需要额外的重绘定时器
     window.setTimeout(() => {
       this.update({ reactions: this.snapshot.reactions.filter((r) => r.id !== item.id) })
-    }, 3200)
+    }, ttl)
   }
 
   private onDataMessage(raw: string) {
@@ -1301,7 +1314,8 @@ export class RoomClient {
       return
     }
     if (msg.type === 'reaction' && msg.emoji && msg.fromId) {
-      this.pushReaction(msg.fromId, msg.emoji)
+      // 名字优先用服务端填的那个：客户端自报的名字不可信，否则谁都能冒充别人发弹幕
+      this.pushReaction(msg.fromId, msg.emoji, msg.text, msg.kind, msg.fromName)
     }
   }
 

@@ -78,6 +78,11 @@ export interface PeerInfo {
   joinedAt: number
   /** 缺省等价于 active（兼容旧服务端） */
   state?: ParticipantState
+  /**
+   * 已设置的头像地址（服务端按令牌身份查库填充，客户端无法自报）。
+   * 为空表示没设头像，界面回落成昵称首字母。
+   */
+  avatarUrl?: string
 }
 
 export interface TrackInfo {
@@ -146,17 +151,27 @@ export interface DataMessage {
   type: 'reaction' | 'raise_hand'
   emoji?: string
   raised?: boolean
+  /** 表情附带的一句话；有它就把这条当**弹幕**显示（服务端限 60 字，超出截断） */
+  text?: string
+  /** 'action' = 互动动效（从底栏弹起的小红花之类）；缺省是角落里的表情浮层 */
+  kind?: 'action'
   /** 服务端中继时填充，客户端无法伪造 */
   fromId?: string
+  /** 同上：发送者名字由服务端填，避免冒充 */
+  fromName?: string
 }
 
-/** 界面上飘一下的表情 */
+/** 界面上飘一下的表情 / 弹幕 / 互动动效（三者共用一条数据通道消息） */
 export interface Reaction {
   id: string
   fromId: string
   fromName: string
   emoji: string
   at: number
+  /** 有文字就是弹幕（底栏上方滚一条），没有就是普通表情浮层 */
+  text?: string
+  /** 'action' 表示互动动效（从底栏往上弹一下） */
+  kind?: 'action'
 }
 
 export interface ChatMessage {

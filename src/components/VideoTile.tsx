@@ -7,6 +7,8 @@ type Quality = 'excellent' | 'good' | 'fair' | 'poor' | 'unknown'
 interface VideoTileProps {
   stream: MediaStream | null
   label: string
+  /** 已设置头像时用它替代首字母（服务端下发，客户端无法自报） */
+  avatarUrl?: string
   /** 本地画面需要镜像（自拍视角） */
   mirrored?: boolean
   /** 该参与者当前是否静音 */
@@ -45,6 +47,7 @@ interface VideoTileProps {
 export function VideoTile({
   stream,
   label,
+  avatarUrl,
   mirrored,
   muted,
   screen,
@@ -113,8 +116,10 @@ export function VideoTile({
         />
       ) : (
         <div className="flex h-full w-full items-center justify-center bg-[var(--surface-2)]">
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-white/10 text-xl font-medium text-neutral-300 sm:h-24 sm:w-24 sm:text-3xl">
-            {label.slice(0, 1).toUpperCase()}
+          <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-full bg-white/10 text-xl font-medium text-neutral-300 sm:h-24 sm:w-24 sm:text-3xl">
+            {avatarUrl
+              ? <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
+              : label.slice(0, 1).toUpperCase()}
           </div>
         </div>
       )}
