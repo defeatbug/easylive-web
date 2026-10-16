@@ -671,6 +671,25 @@ export class RoomClient {
   private exposeDebugHooks(): void {
     if (!import.meta.env?.DEV) return
     const w = window as unknown as Record<string, unknown>
+    // 开发用：屏幕共享的发送参数与轨道信息（生产构建里这段不会存在）
+    w.__easyliveDebugScreen = async () => {
+      const pc = this.pubPC
+      if (!pc) return null
+      const out = { video: 0, audio: 0, contentHint: null as string | null, degradation: null as string | null, maxFramerate: null as number | null }
+      for (const s of pc.getSenders()) {
+        const t = s.track
+        if (!t) continue
+        if (t.kind === 'audio') out.audio++
+        if (t.kind === 'video') {
+          out.video++
+          if (t.contentHint === 'text') out.contentHint = 'text'
+        }
+        const params = s.getParameters?.()
+        if (params?.degradationPreference) out.degradation = params.degradationPreference
+        if (params?.encodings?.[0]?.maxFramerate) out.maxFramerate = params.encodings[0].maxFramerate ?? null
+      }
+      return out
+    }
     w.__easyliveDebugPCs = async () => {
       const dump = async (pc: RTCPeerConnection | null) => {
         if (!pc) return null
@@ -802,17 +821,72 @@ export class RoomClient {
 
     let stream: MediaStream
     try {
-      stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false })
+      // 屏幕共享的两件事都在这一个请求里定下来：
+      //  1. **同时要系统声音**（讲 PPT 里的视频/音乐时是刚需）。Chrome 支持共享标签页/
+      //     屏幕时带音频，Safari/Firefox 多数不支持——不支持时整条请求会直接失败，
+      //     所以必须回退成"仅视频"，不能让共享功能因为音频不可用而不可用。
+      //  2. 分辨率按屏幕给足、帧率压到 15 帧：文字/图表只需要清晰，不需要 30 帧，
+      //     省下来的码率全给分辨率——这就是"文字优先"的第一半。
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: { ideal: 15, max: 30 } },
+        audio: {
+          // 本地不要再放一遍（否则自己的系统声音会绕回来叠一层）。
+          // 该字段是 Chrome 的实际能力，但 lib.dom 里还没有它，所以断言成宽松类型。
+          suppressLocalAudioPlayback: true,
+          // 系统声音不是人声，任何语音处理都会损伤它
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        } as MediaTrackConstraints,
+      })
+    } catch (err) {
+      stream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: { ideal: 15, max: 30 } },
+        audio: false,
+      }).catch((e) => {
+        throw e instanceof Error ? e : err instanceof Error ? err : new Error('屏幕共享被拒绝')
+      })
     } finally {
       this.screenStarting = false
     }
     this.screenStream = stream
     const track = stream.getVideoTracks()[0]
+    // "文字优先"的另一半：告诉编码器这是**文字/图形**内容，
+    // 它会据此选编码参数（不为了运动模糊掉细节）。这是浏览器原生机制，零成本。
+    try {
+      track.contentHint = 'text'
+    } catch {
+      /* 个别浏览器不支持 contentHint，忽略即可 */
+    }
     // 用户点击浏览器"停止共享"时也要通知服务端重协商
     track.onended = () => void this.stopScreenShare()
     this.pubPC.addTrack(track, stream)
+    // 系统声音也发布（source 由 renegotiatePublish('screen') 统一标记为 screen，服务端无需改动）
+    for (const a of stream.getAudioTracks()) this.pubPC.addTrack(a, stream)
     this.update({ screenStream: stream })
     await this.renegotiatePublish('screen')
+    // 协商完成后设置发送参数：丢包时**保分辨率**（宁可掉帧也不要糊成一片），
+    // 这是"文字优先"最实际的体现——弱网下别人仍能看清 PPT 上的字。
+    this.tuneScreenSender(track)
+  }
+
+  /** 屏幕共享的发送参数：丢包时保分辨率、限制帧率上限。 */
+  private tuneScreenSender(track: MediaStreamTrack): void {
+    const pc = this.pubPC
+    if (!pc) return
+    const sender = pc.getSenders().find((s) => s.track === track)
+    if (!sender) return
+    try {
+      const params = sender.getParameters()
+      if (!params.encodings || params.encodings.length === 0) params.encodings = [{}]
+      params.encodings[0].maxFramerate = 15
+      params.degradationPreference = 'maintain-resolution'
+      void sender.setParameters(params).catch((err) => {
+        console.warn('[RoomClient] 屏幕共享发送参数设置失败（不影响共享本身）', err)
+      })
+    } catch (err) {
+      console.warn('[RoomClient] 读取发送参数失败（不影响共享本身）', err)
+    }
   }
 
   async stopScreenShare(): Promise<void> {

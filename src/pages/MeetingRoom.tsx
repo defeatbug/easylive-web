@@ -3,6 +3,7 @@ import { ControlBar } from '../components/ControlBar'
 import { IconCheck, IconCopy } from '../components/Icons'
 import { RecordingsPanel } from '../components/RecordingsPanel'
 import { Whiteboard } from '../components/Whiteboard'
+import { AudioSink } from '../components/AudioSink'
 import { closeAllDetachedWindows } from '../lib/multiWindow'
 import { ShareDialog } from '../components/ShareDialog'
 import { SidePanel } from '../components/SidePanel'
@@ -447,6 +448,21 @@ export function MeetingRoom({
       ))}
 
       {shareOpen && <ShareDialog roomId={roomId} onClose={() => setShareOpen(false)} />}
+
+      {/* 远端音频（麦克风 + 屏幕共享的系统声音）：与视频瓦片解耦。
+          以前音频轨从未被任何元素播放——界面能看不能听，这是补上的缺口。 */}
+      {snapshot.tracks
+        .filter((t) => t.kind === 'audio' && t.publisherId !== snapshot.self?.id)
+        .map((t) => (
+          <AudioSink
+            key={`audio-${t.id}`}
+            stream={snapshot.remoteStreams[t.id] ?? null}
+            label={
+              (snapshot.participants.find((p) => p.id === t.publisherId)?.name ?? '参会者') +
+              (t.source === 'screen' ? ' 的屏幕声音' : '')
+            }
+          />
+        ))}
 
       {whiteboardOpen && (
         <Whiteboard
