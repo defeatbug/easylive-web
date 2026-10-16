@@ -5,7 +5,6 @@ import {
   IconRecord,
   IconChat,
   IconFullscreen,
-  IconGrid,
   IconHand,
   IconLeave,
   IconMembers,
@@ -14,7 +13,6 @@ import {
   IconQr,
   IconScreenShare,
   IconWhiteboard,
-  IconSidebar,
   IconSmile,
   IconStats,
 } from './Icons'
@@ -45,7 +43,6 @@ interface ControlBarProps {
   onToggleView: () => void
   onShare: () => void
   onLeave: () => void
-  onLogout?: () => Promise<void>
   onSelectMic: (deviceId: string) => void
   onSelectCam: (deviceId: string) => void
   /** 自己是否已举手（状态来自服务端） */
@@ -120,7 +117,6 @@ export function ControlBar({
   canRecord,
   onToggleRecording,
   onOpenRecordings,
-  onLogout,
   whiteboardOpen,
   onToggleWhiteboard,
 }: ControlBarProps) {
@@ -346,17 +342,6 @@ export function ControlBar({
               </div>
               <button
                 type="button"
-                className="tm-menu-item"
-                onClick={() => {
-                  onToggleView()
-                  setMoreOpen(false)
-                }}
-              >
-                {view === 'sidebar' ? <IconGrid size={16} /> : <IconSidebar size={16} />}
-                切换为 {view === 'sidebar' ? '宫格视图' : '访客侧栏'}
-              </button>
-              <button
-                type="button"
                 className={`tm-menu-item ${statsOpen ? 'tm-menu-item-active' : ''}`}
                 onClick={() => {
                   onToggleStats()
@@ -388,12 +373,6 @@ export function ControlBar({
                 >
                   <IconRecord size={16} />
                   录制列表
-                </button>
-              )}
-              {onLogout && (
-                <button type="button" className="tm-menu-item" onClick={() => { setMoreOpen(false); void onLogout() }}>
-                  <IconLeave size={16} />
-                  退出登录
                 </button>
               )}
             </div>

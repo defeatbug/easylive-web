@@ -66,7 +66,8 @@ export function MeetingRoom({
   asAdmin,
   onLeave,
   user,
-  onLogout,
+  // onLogout 仍保留在接口里（App.tsx 会传），但会议页不再用它：
+  // 退出登录只在账号弹窗里提供，工具栏的「更多」不再重复一份。
 }: MeetingRoomProps) {
   const { client, snapshot, error, retryMedia, retryConnect } = useRoom(true, roomId, displayName, {
     devices: initialDevices,
@@ -408,7 +409,6 @@ export function MeetingRoom({
             onVirtualBackground={(m) => void client?.setVirtualBackground(m)}
             onToggleHand={() => client?.toggleHand()}
             onReaction={(emoji) => client?.sendReaction(emoji)}
-            onLogout={user ? async () => { try { await onLogout() } catch (reason) { setAccountError(reason instanceof Error ? reason.message : '退出登录失败，请重试。') } } : undefined}
             onLeave={() => {
               closeAllDetachedWindows()
               client?.leave()
