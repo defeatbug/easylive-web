@@ -14,6 +14,7 @@ import {
   IconVideo,
 } from '../components/Icons'
 import { buildConstraints, useDevices } from '../lib/devices'
+import { createRoom } from '../lib/rooms'
 import { useImeGuard } from '../lib/ime'
 import { initialsOf } from '../lib/avatar'
 import type { AccountUser } from '../lib/auth'
@@ -146,7 +147,33 @@ export function JoinPage({ onJoin, user, onLogout, onUserChange }: JoinPageProps
   }
 
   /** 快速会议：随机房间号 + 默认昵称直接进会，对应客户端的"快速会议" */
-  const quickStart = () => {
+  const quickStart = async () => {
+    // 已登录：**真的在服务端创建一个会议**。
+    //
+    // 这是新权限模型的关键一步：会议归属记在服务端（rooms.owner_id），
+    // "谁创建谁就是主持人"由服务端说了算，而不是靠本地勾一个复选框。
+    // 创建成功后拿到一个 8 位编码（大写字母+数字），它就是别人加入用的会议号。
+    if (user) {
+      setHint('正在创建会议…')
+      try {
+        const room = await createRoom()
+        transferredRef.current = true
+        onJoin({
+          roomId: room.roomId,
+          displayName: displayName.trim() || user.displayName || user.username,
+          micId,
+          camId,
+          micOn,
+          camOn,
+          previewStream: preview,
+          asAdmin: false, // 主持人身份由服务端按会议归属判定，这里传什么都不作数
+        })
+      } catch (reason) {
+        setHint(reason instanceof Error ? reason.message : '创建会议失败，请重试。')
+      }
+      return
+    }
+    // 未登录（演示模式 / AUTH_MODE=off）：退回本地随机房间号，保持免登录演示可用
     transferredRef.current = true
     onJoin({
       roomId: randomRoom(),
@@ -221,7 +248,7 @@ export function JoinPage({ onJoin, user, onLogout, onUserChange }: JoinPageProps
                   : initialsOf(user ? (user.displayName || user.username) : displayName)}
               </span>
               <span className="prejoin-account-name">{user ? (user.displayName || user.username) : displayName}</span>
-              <small>{user ? (user.role === 'host' ? '主持人' : '成员') : '访客'}</small>
+              <small>{user ? (user.role === 'admin' ? '管理员' : '成员') : '访客'}</small>
             </button>
             <a className="prejoin-dashboard" href="#/metrics"><IconStats size={16} /> 数据看板</a>
           </div>
@@ -269,7 +296,7 @@ export function JoinPage({ onJoin, user, onLogout, onUserChange }: JoinPageProps
 
             {user ? (
               <p className="prejoin-host-option"><IconShield size={14} />
-                <span>已登录为 {user.role === 'host' ? '主持人' : '成员'} <small>会议权限由服务器按账号分配</small></span>
+                <span>已登录为 {user.role === 'admin' ? '管理员' : '成员'} <small>会议权限由服务器按账号分配</small></span>
               </p>
             ) : (
               <label className="prejoin-host-option">
@@ -284,12 +311,12 @@ export function JoinPage({ onJoin, user, onLogout, onUserChange }: JoinPageProps
                 加入会议 <span aria-hidden="true">↗</span>
               </button>
               <button type="button" onClick={quickStart} className="prejoin-secondary">
-                <IconVideo size={17} /> 快速会议
+                <IconVideo size={17} /> {user ? '创建会议' : '快速会议'}
               </button>
             </div>
 
             <p data-testid="prejoin-hint" role={hint ? 'alert' : undefined} className={`prejoin-hint ${hint ? 'is-error' : ''}`}>
-              {hint ?? '会前先确认设备与昵称。快速会议将自动生成一个新的会议号。'}
+              {hint ?? '会前先确认设备与昵称。创建会议会生成一个 8 位会议号，发给别人即可加入。'}
             </p>
           </form>
 

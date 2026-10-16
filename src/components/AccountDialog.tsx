@@ -236,10 +236,16 @@ export function AccountDialog({ user, guestName, onClose, onUserChange, onLogout
                 {user ? (
                   <>
                     <span className="account-handle">@{user.username}</span>
-                    <span className={`account-role ${user.role === 'host' ? 'is-host' : ''}`}>
+                    <span className={`account-role ${user.role === 'admin' ? 'is-host' : ''}`}>
                       <IconShield size={13} />
-                      {user.role === 'host' ? '主持人' : '成员'}
+                      {user.role === 'admin' ? '管理员' : '成员'}
                     </span>
+                    {/* 只有管理员看得到这个入口；真正的权限判定在服务端（普通用户会拿到 403） */}
+                    {user.role === 'admin' && (
+                      <a className="account-handle" href="#/admin/users" onClick={onClose} title="查看全部用户">
+                        用户管理 ↗
+                      </a>
+                    )}
                   </>
                 ) : (
                   <span className="account-handle">访客 · 未登录</span>

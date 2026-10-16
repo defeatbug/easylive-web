@@ -21,6 +21,10 @@ function buildProxy() {
     '/ws': { target: wsTarget, ws: true },
     // 登录、恢复会话和退出登录都必须与页面同源，否则浏览器无法稳定携带会话 Cookie。
     '/auth': { target: apiTarget, changeOrigin: true },
+    // 会议创建/查询与管理员接口：漏了它们前端会拿到 index.html，
+    // 表现为"Unexpected token '<' ... is not valid JSON"——排查起来很容易绕远路
+    '/rooms': { target: apiTarget, changeOrigin: true },
+    '/admin': { target: apiTarget, changeOrigin: true },
     '/token': { target: apiTarget, changeOrigin: true },
     '/ice': { target: apiTarget, changeOrigin: true },
     '/graphql': { target: apiTarget, changeOrigin: true },

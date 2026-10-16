@@ -5,6 +5,8 @@ import { MeetingRoom } from './pages/MeetingRoom'
 import { restoreAuth, signIn, signOut, signUp, type AccountUser, type AuthSession } from './lib/auth'
 
 const MetricsPage = lazy(() => import('./pages/MetricsPage').then((m) => ({ default: m.MetricsPage })))
+// 管理员页同样懒加载：普通用户永远用不到它，不该进主包
+const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage').then((m) => ({ default: m.AdminUsersPage })))
 const SESSION_KEY = 'easylive.session'
 /**
  * 开发用登录页预览路由。
@@ -154,6 +156,12 @@ export default function App() {
   if (auth.status === 'signed-out') {
     return <LoginPage onLogin={login} onRegister={register} invitedRoom={invitedRoom} />
   }
+  if (hash === '#/admin/users') {
+    return (
+      <AdminUsersPage onBack={() => { window.location.hash = '' }} />
+    )
+  }
+
   if (hash === '#/metrics') {
     return <Suspense fallback={<div className="p-6 text-sm text-neutral-400">正在加载指标报表…</div>}>
       <MetricsPage onBack={() => { window.location.hash = '' }} />

@@ -265,7 +265,7 @@ export function MeetingRoom({
             <span className={`text-[11px] font-medium ${quality.text}`}>{quality.label}</span>
           </div>
           <StatsInline stats={snapshot.stats} />
-          {user && <span className="meeting-account" title={`已登录：${user.username}`}>{user.displayName || user.username} · {user.role === 'host' ? '主持人' : '成员'}</span>}
+          {user && <span className="meeting-account" title={`已登录：${user.username}`}>{user.displayName || user.username} · {user.role === 'admin' ? '管理员' : '成员'}</span>}
           <button type="button" onClick={() => setShareOpen(true)} className="meeting-invite">邀请参会 <span aria-hidden="true">↗</span></button>
         </div>
       </header>
@@ -399,7 +399,9 @@ export function MeetingRoom({
             whiteboardOpen={whiteboardOpen}
             onToggleWhiteboard={() => setWhiteboardOpen((v) => !v)}
             recordingActive={snapshot.recording.active}
-            canRecord={snapshot.grants?.roomAdmin ?? false}
+            // 录制对**所有已入会成员**开放（服务端已放行）：录制走数据通道，所以用 canPublishData 作为依据，
+            // 而不是主持人身份——主持人不在线时，成员也该能留个记录。
+            canRecord={snapshot.grants?.canPublishData ?? false}
             onToggleRecording={() =>
               void client?.setRecording(snapshot.recording.active ? 'stop' : 'start')
             }

@@ -2,7 +2,9 @@ export interface AccountUser {
   id: number
   username: string
   displayName: string
-  role: 'host' | 'member'
+  // admin：全站唯一，权限最高（任何会议里都是主持人，可查看所有用户）
+  // member：普通用户，可以在自己创建的会议里当主持人
+  role: 'admin' | 'member'
   /**
    * 头像地址（形如 /auth/avatar/1?v=1730000000）。
    * 未设置头像时后端不下发该字段，界面回落到首字母头像。
@@ -20,7 +22,7 @@ function parseUser(value: unknown): AccountUser {
   if (!value || typeof value !== 'object') throw new Error('登录服务返回了无效的用户资料，请稍后重试。')
   const user = value as Record<string, unknown>
   if (typeof user.id !== 'number' || typeof user.username !== 'string' ||
-      typeof user.displayName !== 'string' || (user.role !== 'host' && user.role !== 'member')) {
+      typeof user.displayName !== 'string' || (user.role !== 'admin' && user.role !== 'member')) {
     throw new Error('登录服务返回了无效的用户资料，请稍后重试。')
   }
   const out: AccountUser = {
