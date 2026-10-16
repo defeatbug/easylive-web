@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { JoinPage, type JoinRequest } from './pages/JoinPage'
 import { MeetingRoom } from './pages/MeetingRoom'
+import { MetricsPage } from './pages/MetricsPage'
 
 /**
  * 只有一个状态：当前是否在会议中。
@@ -31,7 +32,18 @@ function loadSession(): JoinRequest | null {
 }
 
 export default function App() {
+  // 报表页走 hash 路由：项目刻意不引路由库，一个 hash 足够，也不需要改构建配置。
+  const [hash, setHash] = useState(() => window.location.hash)
+  useEffect(() => {
+    const onHash = () => setHash(window.location.hash)
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
   const [session, setSession] = useState<JoinRequest | null>(loadSession)
+
+  if (hash === '#/metrics') {
+    return <MetricsPage onBack={() => { window.location.hash = '' }} />
+  }
 
   const join = (req: JoinRequest) => {
     try {

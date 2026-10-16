@@ -25,6 +25,8 @@ function buildProxy() {
     '/healthz': { target: apiTarget, changeOrigin: true },
     // 录制列表/下载：与其它 API 一样走反代（漏了它前端会 404，因为请求会打到 Vite 自己）
     '/recordings': { target: apiTarget, changeOrigin: true },
+    // 指标报表页：/metrics/overview 与 /metrics/tracks（同样的坑：漏了前端会 404）
+    '/metrics': { target: apiTarget, changeOrigin: true },
   }
 }
 
