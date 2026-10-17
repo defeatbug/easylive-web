@@ -13,13 +13,11 @@ import {
   IconQr,
   IconScreenShare,
   IconWhiteboard,
-  IconSmile,
   IconStats,
 } from './Icons'
 import { IconSparkle } from './Icons'
 import type { DeviceOption } from '../lib/devices'
 import { usePopover } from '../lib/popover'
-import { useImeGuard } from '../lib/ime'
 import type { VirtualBackgroundMode } from '../lib/virtualBackground'
 
 /** 表情面板里可用的表情（写在前面的是最常用的） */
@@ -122,17 +120,11 @@ export function ControlBar({
   whiteboardOpen,
   onToggleWhiteboard,
 }: ControlBarProps) {
-  const [emojiOpen, setEmojiOpen] = useState(false)
-  // 弹幕输入：在表情面板里打一句话，和表情一起发出去就成了弹幕
-  const [flashText, setFlashText] = useState('')
-  const flashIme = useImeGuard()
   const [moreOpen, setMoreOpen] = useState(false)
   const [fxOpen, setFxOpen] = useState(false)
   // 三个浮层共用同一套互斥逻辑：打开任一都会关掉其它（真人实测：以前会叠在一起）
-  const emojiRef = useRef<HTMLDivElement>(null)
   const moreRef = useRef<HTMLDivElement>(null)
   const fxRef = useRef<HTMLDivElement>(null)
-  usePopover(emojiOpen, setEmojiOpen, emojiRef)
   usePopover(moreOpen, setMoreOpen, moreRef)
   usePopover(fxOpen, setFxOpen, fxRef)
 
@@ -274,79 +266,6 @@ export function ControlBar({
           )}
         </div>
 
-        {/* 表情：向上展开的浮层 */}
-        <div className="meeting-mobile-secondary relative" ref={emojiRef}>
-          <ToolButton
-            active={emojiOpen}
-            onClick={() => setEmojiOpen((v) => !v)}
-            title={canPublishData ? '发送表情（走数据通道）' : '当前令牌无发布数据权限'}
-            label="表情"
-            disabled={!canPublishData}
-          >
-            <IconSmile size={20} />
-          </ToolButton>
-          {/* 互动：点一下就从底栏上方弹起小红花，不需要任何输入（对齐腾讯会议的"互动"） */}
-          <ToolButton
-            onClick={() => onReaction('🌹', undefined, 'action')}
-            title="发送互动：小红花会从底栏弹起"
-            label="互动"
-            disabled={!canPublishData}
-          >
-            <span className="text-xl leading-none">👏</span>
-          </ToolButton>
-          {emojiOpen && (
-            <div className="tm-menu absolute bottom-full left-1/2 z-20 mb-2 w-64 -translate-x-1/2">
-              <div className="flex flex-wrap gap-1">
-                {REACTION_EMOJIS.map((e) => (
-                  <button
-                    key={e}
-                    type="button"
-                    onClick={() => {
-                      // 输入框里有字 → 当弹幕发（底栏上方滚一条）；没字 → 普通表情浮层
-                      onReaction(e, flashText.trim() || undefined)
-                      setFlashText('')
-                      setEmojiOpen(false)
-                    }}
-                    className="rounded-lg px-2 py-1 text-lg transition hover:bg-[var(--surface-3)]"
-                    title={`发送 ${e}`}
-                  >
-                    {e}
-                  </button>
-                ))}
-              </div>
-              <div className="mt-2 flex items-center gap-1.5">
-                <input
-                  value={flashText}
-                  onChange={(event) => setFlashText(event.target.value)}
-                  onCompositionStart={flashIme.onCompositionStart}
-                  onCompositionEnd={flashIme.onCompositionEnd}
-                  onKeyDown={(event) => {
-                    // 输入法回车是"确认候选词"，不能当发送（否则中文用户每打一个词就发一条）
-                    if (event.key !== 'Enter' || flashIme.isImeEnter(event)) return
-                    if (!flashText.trim()) return
-                    onReaction('💬', flashText.trim())
-                    setFlashText('')
-                    setEmojiOpen(false)
-                  }}
-                  maxLength={60}
-                  placeholder="说一句话，表情 + 文字 = 弹幕"
-                  className="tm-input min-w-0 flex-1 py-1 text-xs"
-                  aria-label="弹幕内容"
-                />
-                <button
-                  type="button"
-                  className="tm-btn px-2 py-1 text-xs"
-                  disabled={!flashText.trim()}
-                  onClick={() => {
-                    onReaction('💬', flashText.trim())
-                    setFlashText('')
-                    setEmojiOpen(false)
-                  }}
-                >发送</button>
-              </div>
-            </div>
-          )}
-        </div>
 
         {/* 更多：邀请 / 布局 / 指标 */}
         <div className="relative" ref={moreRef}>

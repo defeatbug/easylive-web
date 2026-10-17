@@ -5,6 +5,7 @@ import type { AccountUser } from '../lib/auth'
 import { RecordingsPanel } from '../components/RecordingsPanel'
 import { Whiteboard } from '../components/Whiteboard'
 import { AudioSink } from '../components/AudioSink'
+import { ReactionDock } from '../components/ReactionDock'
 import { candidateTypeHint, candidateTypeLabel } from '../lib/RoomClient'
 import { closeAllDetachedWindows } from '../lib/multiWindow'
 import { ShareDialog } from '../components/ShareDialog'
@@ -327,6 +328,12 @@ export function MeetingRoom({
 
       <div className="meeting-body relative flex min-h-0 flex-1">
         <main className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden">
+          {/* 弹幕/互动：左下角独立一组（不属于底部导航条），与导航条分开避免误触 */}
+          <ReactionDock
+            onSend={(emoji, text, kind) => client?.sendReaction(emoji, text, kind)}
+            disabled={!(snapshot.grants?.canPublishData ?? false)}
+          />
+
           {/* 表情浮层：绝对定位、不参与排版、不拦截鼠标 */}
           {plainReactions.length > 0 && (
             <div className="pointer-events-none absolute bottom-28 left-4 z-10 flex flex-col-reverse gap-2">
@@ -351,14 +358,14 @@ export function MeetingRoom({
           {flashes.length > 0 && (
             <div className="pointer-events-none absolute inset-x-0 bottom-24 z-20 flex flex-col items-center gap-1.5 px-6">
               {flashes.map((r) => (
+                // 形式按需求定：`用户名：内容`（自己发的是"我：内容"）
                 <div
                   key={r.id}
                   className="danmaku-item max-w-[86%] truncate rounded-full bg-black/70 px-3.5 py-1.5 text-xs text-white/90 shadow-lg"
                 >
-                  <span className="mr-1.5 font-medium text-[var(--brand)]">
-                    {r.fromId === snapshot.self?.id ? '我' : r.fromName}
+                  <span className="font-medium text-[var(--brand)]">
+                    {r.fromId === snapshot.self?.id ? '我' : r.fromName}：
                   </span>
-                  <span className="mr-1.5">{r.emoji}</span>
                   {r.text}
                 </div>
               ))}
@@ -367,9 +374,12 @@ export function MeetingRoom({
 
           {/* 互动动效：小红花从底栏上方弹起约 50px 再淡出 */}
           {actions.map((r) => (
+            // 横向位置**每条自己随机**（生成时就定好，渲染时再算会左右乱跳），
+            // 这样多朵花会从底部不同位置升起，而不是叠在同一个点上
             <div
               key={r.id}
-              className="action-pop pointer-events-none absolute bottom-20 left-1/2 z-20 text-3xl"
+              className="action-pop pointer-events-none absolute bottom-20 z-20 text-3xl"
+              style={{ left: `${8 + (r.x ?? 0.5) * 84}%` }}
               aria-hidden="true"
             >
               {r.emoji}

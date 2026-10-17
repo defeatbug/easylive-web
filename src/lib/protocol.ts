@@ -17,12 +17,14 @@ export type MsgType =
   | 'unpublish'
   | 'mute'
   | 'chat'
+  | 'flash' // 弹幕/互动：{emoji, text?, kind?}（走信令，低频）
   | 'ping'
   | 'moderate' // 主持人操作：mute | kick（需要 roomAdmin）
   | 'record' // 录制开关：start | stop（需要 roomAdmin）
   | 'whiteboard' // 白板操作：{op:{kind,stroke}}（任何参会者都可画）
   // 服务端 -> 客户端
   | 'joined'
+  | 'flash_message' // 服务端广播的弹幕/互动 {flash}
   | 'participant_state'
   | 'publish_answer'
   | 'subscribe_offer'
@@ -147,6 +149,17 @@ export interface SpeakerInfo {
  * 为什么和信令分开两套：信令是**控制面**（可靠、有序、断线要能恢复，队列不能被高频小消息占满），
  * 数据通道是**数据面**（低延迟，瞬时事件丢了无所谓）。
  */
+/** 弹幕 / 互动：走**信令面**（服务端广播给房间内所有人，含发送者自己）。 */
+export interface FlashMessage {
+  fromId: string
+  fromName: string
+  emoji: string
+  text?: string
+  /** 空 = 普通表情浮层；'action' = 互动动效（小红花等） */
+  kind?: 'action'
+  ts: number
+}
+
 export interface DataMessage {
   type: 'reaction' | 'raise_hand'
   emoji?: string
@@ -172,6 +185,8 @@ export interface Reaction {
   text?: string
   /** 'action' 表示互动动效（从底栏往上弹一下） */
   kind?: 'action'
+  /** 互动动效的横向位置（0—1）。**生成时就固定**，否则每帧重算会左右乱跳。 */
+  x?: number
 }
 
 export interface ChatMessage {
@@ -231,6 +246,11 @@ export interface Message {
   grants?: VideoGrant
   track?: TrackInfo
   message?: ChatMessage
+  /** 弹幕/互动的入参（客户端 → 服务端） */
+  emoji?: string
+  kind?: 'action'
+  /** 服务端广播的弹幕/互动 */
+  flash?: FlashMessage
   speakers?: SpeakerInfo[]
   raised?: boolean
   code?: string

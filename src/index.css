@@ -868,3 +868,41 @@ body {
   .danmaku-item, .action-pop { animation: none; }
   .action-pop { opacity: 1; transform: translate(-50%, -50px); }
 }
+
+/* ---------- 左下角的弹幕/互动按钮组（独立于底部导航条）---------- */
+.reaction-dock { position: absolute; left: 20px; bottom: 96px; z-index: 30; }
+.reaction-dock-row { display: flex; align-items: center; gap: 8px; }
+.reaction-dock-btn {
+  display: grid; width: 40px; height: 40px; place-items: center;
+  border: 1px solid var(--line); border-radius: 12px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  font-size: 19px; cursor: pointer; backdrop-filter: blur(6px);
+  transition: background .15s, border-color .15s, transform .15s;
+}
+.reaction-dock-btn:hover { border-color: var(--brand); transform: translateY(-1px); }
+.reaction-dock-btn.is-active { border-color: var(--brand); background: var(--brand-tint); }
+.reaction-dock-btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+.reaction-dock-panel {
+  position: absolute; left: 0; bottom: calc(100% + 8px);
+  width: 268px; padding: 10px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--surface); box-shadow: var(--shadow-pop, 0 10px 30px rgba(0,0,0,.28));
+}
+.reaction-dock-emojis { display: flex; flex-wrap: wrap; gap: 4px; }
+.reaction-dock-emoji { padding: 2px 6px; border-radius: 8px; font-size: 18px; cursor: pointer; }
+.reaction-dock-emoji:hover { background: var(--surface-3); }
+.reaction-dock-input-row { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.reaction-dock-input {
+  min-width: 0; flex: 1; padding: 5px 8px; font-size: 12px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--surface-2); color: var(--text);
+}
+.reaction-dock-send {
+  padding: 5px 10px; font-size: 12px; border-radius: 8px; cursor: pointer;
+  background: var(--brand); color: #fff; border: none;
+}
+.reaction-dock-send:disabled { opacity: .45; cursor: not-allowed; }
+
+/* 互动动效横向随机：动画里不能再动 translateX，否则会盖掉随机位置 */
+@media (prefers-reduced-motion: reduce) {
+  .reaction-dock-panel { transition: none; }
+}

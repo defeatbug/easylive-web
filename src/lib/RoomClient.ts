@@ -1195,13 +1195,14 @@ export class RoomClient {
    *   · kind='action'  → 互动动效（从底栏往上弹一下）
    */
   sendReaction(emoji: string, text?: string, kind?: 'action') {
-    // 表情是瞬时事件，只走数据面；发不出去时明确告知，避免"点了没反应"
-    if (!this.sendData({ type: 'reaction', emoji, text, kind })) {
-      this.update({ notice: '数据通道尚未就绪，表情未发送（稍后重试或刷新页面）' })
-      return
-    }
-    // 自己发的名字直接写"我"：本地不一定有自己的 participant 记录
-    this.pushReaction(this.snapshot.self?.id ?? 'me', emoji, text, kind, '我')
+    // **走信令面**（原来是数据面）。
+    //
+    // 为什么改：数据面在浏览器上出现了"服务端显示送达、页面收不到"的情况，
+    // 而信令这条路上的聊天/举手/白板在所有客户端上都已验证可靠。
+    // 弹幕与互动是低频消息，走信令完全够用。
+    // 服务端会把这条广播给房间里**所有人（含发送者自己）**，所以这里**不做本地回显**——
+    // 否则自己会看到两条，而且"自己看到的"和"别人看到的"可能不一致。
+    this.send({ type: 'flash', emoji, text, kind })
   }
 
   /**
@@ -1304,6 +1305,8 @@ export class RoomClient {
       at: Date.now(),
       text,
       kind,
+      // 互动动效的横向位置在这里定下来：渲染时再随机的话，每帧重算会导致左右乱跳
+      x: Math.random(),
     }
     // 带文字的当弹幕显示，读起来要点时间，所以留久一点（6s vs 3.2s）
     const ttl = text ? 6000 : 3200
@@ -1405,6 +1408,13 @@ export class RoomClient {
       msg = JSON.parse(ev.data as string) as Message
     } catch {
       return
+    }
+
+    // 弹幕/互动：服务端广播回来的那条。fromId/fromName 由服务端填（客户端无法伪造），
+    // 而且**发送者自己也会收到**——所以客户端不做本地回显，两边看到的内容永远一致。
+    if (msg.type === 'flash_message' && msg.flash) {
+      const f = msg.flash
+      this.pushReaction(f.fromId, f.emoji, f.text, f.kind, f.fromName)
     }
 
     // 1) 先看是否有人在等这个响应
