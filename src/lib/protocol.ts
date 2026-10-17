@@ -120,6 +120,8 @@ export interface WhiteboardOp {
   by?: string
   /** 服务端填写：房间内递增序号 */
   seq?: number
+  /** 仅 kind=undo 时服务端填写：被撤销那一笔的 seq */
+  undoSeq?: number
 }
 
 export interface RoomState {
