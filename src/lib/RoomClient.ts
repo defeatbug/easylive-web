@@ -640,9 +640,17 @@ export class RoomClient {
     this.pubDC = dc
     dc.onopen = () => this.update({ dataChannelReady: true })
     dc.onclose = () => this.update({ dataChannelReady: false })
+    // **必须在自己建的这条上也监听**：SCTP 通道是双向的，服务端就在这条上回推。
+    // 之前只有下面那条"服务端反向开的通道"挂了 onmessage，而它在当前 SDP 时序下
+    // 根本不会触发 ondatachannel —— 结果就是别人发的表情/弹幕永远收不到，
+    // 发送方却一切正常（服务端还显示"送达 1/1"），非常难查。
+    dc.onmessage = (ev) => this.onDataMessage(ev.data as string)
 
     // 服务端会在同一条 SCTP 关联上反向开一条用于推送（不需要重新协商）
     pub.ondatachannel = (e) => {
+      // DEV 诊断：数据面没有"送达确认"，出问题时必须能看出"服务端那条通道到底建起来没有"
+      if (import.meta.env.DEV) console.debug('[dc] 服务端反向通道已建立 label=' + e.channel.label)
+      e.channel.onopen = () => { if (import.meta.env.DEV) console.debug('[dc] 服务端反向通道已就绪') }
       e.channel.onmessage = (ev) => this.onDataMessage(ev.data as string)
     }
 
@@ -1312,6 +1320,11 @@ export class RoomClient {
       msg = JSON.parse(raw) as DataMessage
     } catch {
       return
+    }
+    // DEV 专用诊断：数据面是"尽力而为"的，收到没收到在界面上分辨不出来，
+    // 出问题时只能靠这一行判断"消息到底有没有到浏览器"（生产构建会被摇掉）。
+    if (import.meta.env.DEV) {
+      console.debug('[datachannel] 收到', msg.type, msg.emoji ?? '', msg.text ?? '', msg.kind ?? '', msg.fromId ?? '')
     }
     if (msg.type === 'reaction' && msg.emoji && msg.fromId) {
       // 名字优先用服务端填的那个：客户端自报的名字不可信，否则谁都能冒充别人发弹幕
