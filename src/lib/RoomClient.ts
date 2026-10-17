@@ -1025,7 +1025,7 @@ export class RoomClient {
     const camTrack = this.vbCameraTrack ?? this.localStream?.getVideoTracks()[0]
     if (camTrack) camTrack.enabled = enabled
     this.update({ camEnabled: enabled })
-    const track = this.snapshot.tracks.find((t) => t.publisherId === this.snapshot.self?.id && t.source !== 'screen')
+    const track = this.snapshot.tracks.find((t) => t.publisherId === this.snapshot.self?.id && t.kind === 'video' && t.source !== 'screen')
     if (track) this.send({ type: 'mute', trackId: track.id, muted: !enabled })
   }
 
@@ -1474,6 +1474,7 @@ export class RoomClient {
 
   private async collectStats() {
     let rtt = 0
+    let nominatedFound = false
     let jitter = 0
     let lost = 0
     let outBytes = 0
@@ -1485,9 +1486,16 @@ export class RoomClient {
       if (!pc) return
       const reports = await pc.getStats()
       reports.forEach((r) => {
-        const s = r as unknown as Record<string, number | string>
-        if (r.type === 'candidate-pair' && s.state === 'succeeded' && typeof s.currentRoundTripTime === 'number') {
-          rtt = Math.max(rtt, (s.currentRoundTripTime as number) * 1000)
+        const s = r as unknown as Record<string, number | string | boolean>
+        if (r.type === 'candidate-pair' && typeof s.currentRoundTripTime === 'number') {
+          // 评测口径（docs/evaluation.md）：RTT 取被提名（nominated）的候选对；
+          // 直接对所有 succeeded 对取最大会虚高约 500 倍。无 nominated 对时回退到旧行为。
+          if (s.nominated === true) {
+            rtt = (s.currentRoundTripTime as number) * 1000
+            nominatedFound = true
+          } else if (!nominatedFound && s.state === 'succeeded') {
+            rtt = Math.max(rtt, (s.currentRoundTripTime as number) * 1000)
+          }
         }
         if (r.type === 'inbound-rtp') {
           if (typeof s.jitter === 'number') jitter = Math.max(jitter, (s.jitter as number) * 1000)
