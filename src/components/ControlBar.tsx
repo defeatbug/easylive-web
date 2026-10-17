@@ -366,7 +366,7 @@ export function ControlBar({
         type="button"
         onClick={onLeave}
         title="离开会议"
-        className="meeting-bar-slot pointer-events-auto flex items-center gap-1.5 rounded-xl bg-[var(--danger)] px-4 text-[12px] font-medium text-white transition hover:brightness-110"
+        className="tm-leave meeting-bar-slot pointer-events-auto flex items-center gap-1.5 rounded-xl px-4 text-[12px] font-medium"
       >
         <IconLeave size={18} />
         离开
