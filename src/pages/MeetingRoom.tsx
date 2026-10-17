@@ -327,9 +327,11 @@ export function MeetingRoom({
 
       <div className="meeting-body relative flex min-h-0 flex-1">
         <main className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden">
-          {/* 表情浮层：绝对定位、不参与排版、不拦截鼠标 */}
+          {/* 表情浮层：绝对定位、不参与排版、不拦截鼠标。
+              位置在**中下**（原来是 left-4 贴左下角）——和弹幕一样居中，
+              否则同一个功能会出现"有的在中间、有的在左下角"两种位置。 */}
           {plainReactions.length > 0 && (
-            <div className="pointer-events-none absolute bottom-28 left-4 z-10 flex flex-col-reverse gap-2">
+            <div className="pointer-events-none absolute inset-x-0 bottom-28 z-10 flex flex-col-reverse items-center gap-2">
               {plainReactions.map((r) => (
                 <div
                   key={r.id}
