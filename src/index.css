@@ -913,3 +913,22 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .reaction-dock-panel { transition: none; }
 }
+
+/* ---------- 统一的键盘聚焦样式 ---------- */
+/*
+ * 为什么要有这一段：底部导航条的按钮此前**没有任何 focus 样式**，走的是浏览器默认
+ * （各浏览器、各元素形态都不一样），于是"每个按钮的聚焦效果大小不一"。
+ * 现在会议内所有可聚焦元素共用一条规则：同样的线宽、同样的偏移、并跟随各自圆角。
+ * 键盘用户看到的就是一套一致的反馈，而不是十种。
+ */
+:where(.meeting-toolbar, .reaction-dock, .meeting-topbar, .meeting-body, .tm-card) :focus-visible,
+:where(.meeting-toolbar, .reaction-dock) button:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  border-radius: inherit;
+}
+/* 深色会议界面里用亮色描边更清楚；浅色页面（会前/登录）用同一个蓝 */
+.theme-meeting :focus-visible { outline-color: var(--brand); }
+
+/* 鼠标点击不显示聚焦环：只有键盘操作（:focus-visible）才显示，避免"点一下就亮一圈" */
+:where(.meeting-toolbar, .reaction-dock) button:focus:not(:focus-visible) { outline: none; }
