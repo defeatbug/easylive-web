@@ -870,10 +870,17 @@ body {
 }
 
 /* ---------- 左下角的弹幕/互动按钮组（独立于底部导航条）---------- */
-.reaction-dock { position: absolute; left: 20px; bottom: 96px; z-index: 30; }
-.reaction-dock-row { display: flex; align-items: center; gap: 8px; }
+/* 底部一行的三个部分统一 48px 高：左侧按钮组、中间导航条、右侧退出 */
+.meeting-bar-slot { height: 48px; }
+.meeting-toolbar-inner > * { height: 100%; }
+
+/* 表情/互动：不再绝对定位，改为这一行的左块（与导航条水平、同高）。
+   pointer-events:auto 是必须的——工具栏根节点是 pointer-events:none（为了不挡住视频的双击全屏），
+   子元素必须显式打开，否则按钮点不动、点击会被下面的舞台接走。 */
+.reaction-dock { position: relative; pointer-events: auto; }
+.reaction-dock-row { display: flex; align-items: center; gap: 8px; height: 48px; }
 .reaction-dock-btn {
-  display: grid; width: 40px; height: 40px; place-items: center;
+  display: grid; width: 48px; height: 48px; place-items: center;
   border: 1px solid var(--line); border-radius: 12px;
   background: color-mix(in srgb, var(--surface) 92%, transparent);
   font-size: 19px; cursor: pointer; backdrop-filter: blur(6px);

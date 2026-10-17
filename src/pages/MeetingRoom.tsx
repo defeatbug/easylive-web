@@ -5,7 +5,6 @@ import type { AccountUser } from '../lib/auth'
 import { RecordingsPanel } from '../components/RecordingsPanel'
 import { Whiteboard } from '../components/Whiteboard'
 import { AudioSink } from '../components/AudioSink'
-import { ReactionDock } from '../components/ReactionDock'
 import { candidateTypeHint, candidateTypeLabel } from '../lib/RoomClient'
 import { closeAllDetachedWindows } from '../lib/multiWindow'
 import { ShareDialog } from '../components/ShareDialog'
@@ -328,12 +327,6 @@ export function MeetingRoom({
 
       <div className="meeting-body relative flex min-h-0 flex-1">
         <main className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden">
-          {/* 弹幕/互动：左下角独立一组（不属于底部导航条），与导航条分开避免误触 */}
-          <ReactionDock
-            onSend={(emoji, text, kind) => client?.sendReaction(emoji, text, kind)}
-            disabled={!(snapshot.grants?.canPublishData ?? false)}
-          />
-
           {/* 表情浮层：绝对定位、不参与排版、不拦截鼠标 */}
           {plainReactions.length > 0 && (
             <div className="pointer-events-none absolute bottom-28 left-4 z-10 flex flex-col-reverse gap-2">

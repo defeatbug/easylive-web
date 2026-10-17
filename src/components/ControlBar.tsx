@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { DevicePicker } from './DevicePicker'
+import { ReactionDock } from './ReactionDock'
 import {
   IconCam,
   IconRecord,
@@ -129,8 +130,18 @@ export function ControlBar({
   usePopover(fxOpen, setFxOpen, fxRef)
 
   return (
-    <div className="meeting-toolbar pointer-events-none absolute inset-x-0 bottom-0 z-30 flex justify-center px-4 pb-4">
-      <div className="meeting-toolbar-inner pointer-events-auto flex items-center gap-1 rounded-xl border border-[var(--line)] bg-[var(--surface)]/95 px-2 py-1.5 shadow-[var(--shadow-pop)] backdrop-blur">
+    // 底部一行三块：**左**表情/互动、**中**导航按钮、**右**退出。
+    // 三者同高（都走 .meeting-bar-slot 的 48px），整体落在舞台预留的下边距里，
+    // 所以不会压在视频画面上。
+    <div className="meeting-toolbar pointer-events-none absolute inset-x-0 bottom-0 z-30 flex items-center justify-between gap-3 px-4 pb-3">
+      {/* 左：表情 + 互动 */}
+      <ReactionDock
+        onSend={(emoji, text, kind) => onReaction(emoji, text, kind)}
+        disabled={!canPublishData}
+      />
+
+      {/* 中：导航按钮 */}
+      <div className="meeting-toolbar-inner meeting-bar-slot pointer-events-auto flex items-center gap-1 rounded-xl border border-[var(--line)] bg-[var(--surface)]/95 px-2 shadow-[var(--shadow-pop)] backdrop-blur">
         <DevicePicker
           variant="tool"
           icon={<IconMic size={20} muted={!micEnabled} />}
@@ -348,16 +359,18 @@ export function ControlBar({
 
         <span className="mx-1 h-8 w-px bg-[var(--line)]" />
 
-        <button
-          type="button"
-          onClick={onLeave}
-          title="离开会议"
-          className="flex h-[52px] items-center gap-1.5 rounded-lg bg-[var(--danger)] px-4 text-[12px] font-medium text-white transition hover:brightness-110"
-        >
-          <IconLeave size={18} />
-          离开
-        </button>
       </div>
+
+      {/* 右：退出（与导航条同高、水平对齐） */}
+      <button
+        type="button"
+        onClick={onLeave}
+        title="离开会议"
+        className="meeting-bar-slot pointer-events-auto flex items-center gap-1.5 rounded-xl bg-[var(--danger)] px-4 text-[12px] font-medium text-white transition hover:brightness-110"
+      >
+        <IconLeave size={18} />
+        离开
+      </button>
     </div>
   )
 }
