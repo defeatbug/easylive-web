@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { DevicePicker } from './DevicePicker'
 import { ReactionDock } from './ReactionDock'
 import {
+  IconAISummary,
   IconCam,
   IconRecord,
   IconChat,
@@ -71,6 +72,11 @@ interface ControlBarProps {
   /** 白板是否已打开 */
   whiteboardOpen: boolean
   onToggleWhiteboard: () => void
+  /** AI 总结面板是否打开 */
+  aiSummaryOpen: boolean
+  /** AI 总结会话是否在运行（服务端状态，全员可见） */
+  aiSummaryActive: boolean
+  onToggleAISummary: () => void
 }
 
 /**
@@ -120,6 +126,9 @@ export function ControlBar({
   onOpenRecordings,
   whiteboardOpen,
   onToggleWhiteboard,
+  aiSummaryOpen,
+  aiSummaryActive,
+  onToggleAISummary,
 }: ControlBarProps) {
   const [moreOpen, setMoreOpen] = useState(false)
   const [fxOpen, setFxOpen] = useState(false)
@@ -218,6 +227,20 @@ export function ControlBar({
           disabled={!canPublishData}
         >
           <IconWhiteboard size={20} />
+        </ToolButton>
+
+        {/* AI 总结：任何参会者可用。点开面板时若服务端没在跑会自动启动，
+            纪要实时更新；运行时图标呼吸提示，全员可见。 */}
+        <ToolButton
+          mobileSecondary
+          active={aiSummaryOpen}
+          onClick={onToggleAISummary}
+          title={aiSummaryActive ? 'AI 总结运行中（点击查看实时纪要）' : 'AI 总结（实时转写并生成会议纪要）'}
+          label="AI 总结"
+        >
+          <span className={aiSummaryActive ? 'tm-pulse' : undefined}>
+            <IconAISummary size={20} />
+          </span>
         </ToolButton>
 
         {/* 录制：仅主持人可见。未开启录制能力时服务端会返回明确错误，按钮不显示。

@@ -49,7 +49,7 @@ interface Tile {
 
 /** 只剩两种布局：宫格 / 左侧访客栏。屏幕共享不再是一种"视图"，而是自动占据主舞台。 */
 type ViewMode = 'grid' | 'sidebar'
-type PanelTab = 'chat' | 'people' | 'stats'
+type PanelTab = 'chat' | 'people' | 'stats' | 'ai'
 
 /**
  * 会议主界面。
@@ -83,6 +83,8 @@ export function MeetingRoom({
 
   const [panelOpen, setPanelOpen] = useState(false)
   const [tab, setTab] = useState<PanelTab>('chat')
+  /** AI 总结启动中（防重复点击；失败会回落） */
+  const [aiStarting, setAiStarting] = useState(false)
   const [view, setView] = useState<ViewMode>('grid')
   const [activeKey, setActiveKey] = useState<string | null>(null)
   const [shareOpen, setShareOpen] = useState(false)
@@ -446,6 +448,27 @@ export function MeetingRoom({
             canPublishData={snapshot.grants?.canPublishData ?? true}
             whiteboardOpen={whiteboardOpen}
             onToggleWhiteboard={() => setWhiteboardOpen((v) => !v)}
+            aiSummaryOpen={panelOpen && tab === 'ai'}
+            aiSummaryActive={snapshot.aiSummary.active}
+            onToggleAISummary={() => {
+              const isOpen = panelOpen && tab === 'ai'
+              if (isOpen) {
+                setPanelOpen(false)
+                return
+              }
+              setTab('ai')
+              setPanelOpen(true)
+              // 打开面板时若服务端没在跑，自动启动——"一个按钮即实时纪要"
+              if (!snapshot.aiSummary.active && !aiStarting) {
+                setAiStarting(true)
+                void client
+                  ?.setAISummary('start')
+                  .catch((e: unknown) => {
+                    window.alert(`启动 AI 总结失败：${e instanceof Error ? e.message : String(e)}`)
+                  })
+                  .finally(() => setAiStarting(false))
+              }
+            }}
             recordingActive={snapshot.recording.active}
             // 录制对**所有已入会成员**开放（服务端已放行）：录制走数据通道，所以用 canPublishData 作为依据，
             // 而不是主持人身份——主持人不在线时，成员也该能留个记录。
@@ -489,6 +512,24 @@ export function MeetingRoom({
               })
             }}
             onSend={(t) => client?.sendChat(t)}
+            aiSummary={snapshot.aiSummary}
+            aiStarting={aiStarting}
+            onStartAISummary={() => {
+              if (aiStarting) return
+              setAiStarting(true)
+              void client
+                ?.setAISummary('start')
+                .catch((e: unknown) => {
+                  window.alert(`启动 AI 总结失败：${e instanceof Error ? e.message : String(e)}`)
+                })
+                .finally(() => setAiStarting(false))
+            }}
+            onStopAISummary={() => {
+              if (!window.confirm('确定停止 AI 总结？转写与纪要生成都会停。')) return
+              void client?.setAISummary('stop').catch((e: unknown) => {
+                window.alert(`停止失败：${e instanceof Error ? e.message : String(e)}`)
+              })
+            }}
           />
         )}
       </div>

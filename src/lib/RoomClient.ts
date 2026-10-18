@@ -12,6 +12,7 @@ import { startVirtualBackground, type VirtualBackgroundHandle, type VirtualBackg
 import { fetchRecordings, type RecordingState, type RecordingsResponse } from './recordings'
 import type { WhiteboardOp } from './protocol'
 import type {
+  AISummaryState,
   Candidate,
   ChatMessage,
   ConnectionState,
@@ -105,6 +106,7 @@ export interface RoomSnapshot {
   virtualBackgroundBusy: boolean
   /** 当前录制状态（服务端广播 + 入会快照；active=true 时全员显示红点） */
   recording: RecordingState
+  aiSummary: AISummaryState
   /** 房间白板内容（来自入会快照 + 服务端广播；存操作序列，可撤销、可完整还原） */
   whiteboard: WhiteboardOp[]
 }
@@ -287,6 +289,7 @@ export class RoomClient {
       virtualBackground: 'off',
       virtualBackgroundBusy: false,
       recording: { active: false },
+      aiSummary: { active: false },
       whiteboard: [],
     }
   }
@@ -345,6 +348,7 @@ export class RoomClient {
       notice: null,
       // 入会快照带回录制状态：中途进来的人不必等下一次广播才知道"正在录制"
       recording: joined.room?.recording ?? { active: false },
+      aiSummary: joined.room?.aiSummary ?? { active: false },
       whiteboard: joined.room?.whiteboard ?? [],
     })
     const self = joined.room?.participants.find((p) => p.id === joined.participantId) ?? null
@@ -1284,6 +1288,16 @@ export class RoomClient {
     this.update({ notice: action === 'start' ? '已开始录制（本机零转码落盘）' : '已停止录制，录制文件已写入服务端' })
   }
 
+  /**
+   * 开关 AI 会议总结（任何参会者可用，服务端会校验已入会）。
+   *
+   * 开启后服务端订阅各路音频做转写 + 定时生成 markdown 纪要，
+   * 通过 ai_summary_state / ai_summary_update 推送回来。
+   */
+  async setAISummary(action: 'start' | 'stop'): Promise<void> {
+    await this.request({ type: 'ai_summary', action }, ['ai_summary'], 8000)
+  }
+
   /** 拉注册制会话列表（HTTP 查询，不走信令）。失败返回 null，由 UI 提示。 */
   async listRecordings(): Promise<RecordingsResponse | null> {
     return fetchRecordings()
@@ -1515,6 +1529,11 @@ export class RoomClient {
       }
       case 'recording_state': {
         this.update({ recording: msg.recording ?? { active: false } })
+        break
+      }
+      case 'ai_summary_state':
+      case 'ai_summary_update': {
+        this.update({ aiSummary: msg.aiSummary ?? { active: false } })
         break
       }
       case 'chat_message': {
