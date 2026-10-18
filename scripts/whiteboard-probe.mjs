@@ -15,6 +15,8 @@ async function join(name) {
   await p.goto(URL, { waitUntil: 'domcontentloaded' })
   await p.waitForSelector('form', { timeout: 20000 })
   await p.waitForTimeout(2000)
+  // 注意：这个探针写在"登录功能之前"，现在会先停在登录页，需要先登录再进会前页。
+  // 新白板行为（撤销归属/缩放）由 scripts/wb-new-probe.mjs 覆盖；这里的 11 项检查待补登录步骤。
   const inputs = await p.$$('form input[type="text"], form input:not([type])')
   // 每次运行用独立房间：白板是房间级共享状态，固定房间号会把上一轮的笔迹带进来，
   // 让"笔数=1"这类断言假失败（第一次踩到就是这个原因）。
