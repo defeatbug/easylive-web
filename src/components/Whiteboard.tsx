@@ -373,8 +373,10 @@ export function Whiteboard({ ops, selfId, nameOf, onOp, onClose }: WhiteboardPro
           </div>
         </header>
 
-        {/* 画布区 */}
-        <div ref={wrapRef} className="relative min-h-0 flex-1 bg-white">
+        {/* 画布区：白纸隐喻——深色面板上的一张"纸"（圆角 + 投影），
+            避免纯白画布与深色面板硬切。wrapRef 移到纸上，尺寸同步不受影响。 */}
+        <div className="min-h-0 flex-1 p-3 sm:p-4">
+          <div ref={wrapRef} className="relative h-full w-full overflow-hidden rounded-lg bg-white shadow-[0_2px_18px_rgba(0,0,0,0.28)]">
           <canvas
             ref={canvasRef}
             className="absolute inset-0 h-full w-full touch-none"
@@ -395,6 +397,7 @@ export function Whiteboard({ ops, selfId, nameOf, onOp, onClose }: WhiteboardPro
               {hint}
             </p>
           )}
+          </div>
         </div>
 
         <footer className="flex shrink-0 items-center gap-3 border-t border-[var(--line)] px-3 py-1.5 text-[11px] text-[var(--text-mute)]">

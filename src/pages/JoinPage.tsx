@@ -13,7 +13,7 @@ import {
   IconStats,
   IconVideo,
 } from '../components/Icons'
-import { buildConstraints, useDevices } from '../lib/devices'
+import { buildConstraints, describeDeviceError, useDevices } from '../lib/devices'
 import { createRoom } from '../lib/rooms'
 import { useImeGuard } from '../lib/ime'
 import { initialsOf } from '../lib/avatar'
@@ -69,6 +69,10 @@ export function JoinPage({ onJoin, user, onLogout, onUserChange }: JoinPageProps
   const [asAdmin, setAsAdmin] = useState(false)
   const [preview, setPreview] = useState<MediaStream | null>(null)
   const [hint, setHint] = useState<string | null>(null)
+  /** 设备状态机：waiting（等授权）/ ready（已就绪）/ error（失败）。
+      不能只用 preview 是否为 null 判断——失败时 preview 也是 null，
+      否则 badge 会一直显示"等待设备授权"，与实际状态脱节。 */
+  const [deviceState, setDeviceState] = useState<'waiting' | 'ready' | 'error'>('waiting')
   const [copied, setCopied] = useState(false)
   const [deviceRetry, setDeviceRetry] = useState(0)
   /** 账号中心弹窗：左下角头像与顶栏账号都能打开它 */
@@ -84,6 +88,7 @@ export function JoinPage({ onJoin, user, onLogout, onUserChange }: JoinPageProps
   useEffect(() => {
     let cancelled = false
     let stream: MediaStream | null = null
+    setDeviceState('waiting')
 
     void navigator.mediaDevices
       .getUserMedia(buildConstraints({ micId, camId }, { audio: true, video: true }))
@@ -96,11 +101,14 @@ export function JoinPage({ onJoin, user, onLogout, onUserChange }: JoinPageProps
         setPreview(s)
         refresh() // 授权后设备名才可用
         setHint(null)
+        setDeviceState('ready')
       })
       .catch((e: unknown) => {
         if (!cancelled) {
           setPreview(null)
-          setHint(`无法访问摄像头/麦克风：${e instanceof Error ? e.message : String(e)}`)
+          // 错误信息映射成中文：浏览器抛出的 message 是英文（如 Requested device not found）
+          setHint(`无法访问摄像头/麦克风：${describeDeviceError(e)}`)
+          setDeviceState('error')
         }
       })
 
@@ -327,8 +335,8 @@ export function JoinPage({ onJoin, user, onLogout, onUserChange }: JoinPageProps
                 <div className="prejoin-section-label">02 / CHECK YOUR SETUP</div>
                 <h2 id="prejoin-device-heading">入会前设置</h2>
               </div>
-              <span className={`prejoin-device-status ${preview ? 'is-ready' : ''}`}>
-                <span aria-hidden="true" />{preview ? '设备已就绪' : '等待设备授权'}
+              <span className={`prejoin-device-status ${deviceState === 'ready' ? 'is-ready' : deviceState === 'error' ? 'is-error' : ''}`}>
+                <span aria-hidden="true" />{deviceState === 'ready' ? '设备已就绪' : deviceState === 'error' ? '设备不可用' : '等待设备授权'}
               </span>
             </div>
 
