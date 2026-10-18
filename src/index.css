@@ -893,6 +893,32 @@ body {
 .meeting-bar-slot { height: 48px; }
 .meeting-toolbar-inner > * { height: 100%; }
 
+/* 导航条内所有按钮统一尺寸：同高（跟随工具栏）同宽，悬停背景一样大、排成一条直线。
+   之所以需要这里覆盖：.tm-tool 基类写了 height:52px，而包在浮层容器
+   （特效/更多）或 DevicePicker 里层的按钮不受 `.meeting-toolbar-inner > *`
+   约束，会按 52px 溢出；DevicePicker 的主体按钮又天生偏窄。 */
+.meeting-toolbar-inner .tm-tool,
+.meeting-toolbar-inner .tm-picker-tool {
+  width: 60px;
+  min-width: 0;
+  height: 100%;
+  padding: 0 2px;
+  flex: none;
+}
+/* picker 自身不要留水平 padding：主体按钮按 content box 算宽度，留白会让它比别的按钮窄 */
+.meeting-toolbar-inner .tm-picker-tool {
+  padding: 0;
+}
+/* DevicePicker 主体按钮撑满整个 picker 区域（含原来的小箭头位置，箭头是绝对定位） */
+.meeting-toolbar-inner .tm-picker-tool .tm-picker-main {
+  width: 100%;
+  height: 100%;
+}
+@media (max-width: 380px) {
+  .meeting-toolbar-inner .tm-tool,
+  .meeting-toolbar-inner .tm-picker-tool { width: 52px; }
+}
+
 /* 表情/互动：不再绝对定位，改为这一行的左块（与导航条水平、同高）。
    pointer-events:auto 是必须的——工具栏根节点是 pointer-events:none（为了不挡住视频的双击全屏），
    子元素必须显式打开，否则按钮点不动、点击会被下面的舞台接走。 */
