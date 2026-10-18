@@ -12,7 +12,7 @@ const launch = () => chromium.launch({ executablePath: '/Applications/Google Chr
 const bA = await launch(), bB = await launch()
 const open = async (b, user, pass, url = URL) => {
   const p = await (await b.newContext({ ignoreHTTPSErrors: true, permissions: ['camera','microphone'], viewport: { width: 1280, height: 860 } })).newPage()
-  p.on('dialog', (d) => d.accept())
+  p.on('dialog', (d) => d.accept()) // 清空白板会弹 confirm：不处理会把流程卡住
   await p.goto(url, { waitUntil: 'domcontentloaded' }); await p.waitForTimeout(3000)
   await p.locator('input[autocomplete="username"]').fill(user)
   await p.locator('input[type="password"]').fill(pass)
@@ -46,14 +46,16 @@ await openBoard(B); await B.waitForTimeout(500)
 await draw(B, [420, 560], [760, 680])
 check('B 画一笔后两人都看到 2 笔', (await strokes(A)) === 2 && (await strokes(B)) === 2, `A=${await strokes(A)} B=${await strokes(B)}`)
 await B.waitForTimeout(400)
-// A 点撤销：只能撤掉 A 自己的那一笔，B 的必须留下
-await A.locator('button', { hasText: '撤销' }).first().click()
-await A.waitForTimeout(900); await B.waitForTimeout(900)
-check('A 撤销后只剩 1 笔', (await strokes(A)) === 1 && (await strokes(B)) === 1, `A=${await strokes(A)} B=${await strokes(B)}`)
-// 从 **A 的视角**看：剩下那一笔应当是 B 的（显示对方的名字）；
-// 在 B 自己的页面上它显示"我"——那是正确行为，不能拿它当反例
-check('【关键】留下的那一笔是 B 的（撤销没有误删别人的）', (await footerBy(A)).includes('鲍勃'),
-  `A 看到最后绘制者=${await footerBy(A)} / B 自己看到=${await footerBy(B)}`)
+// 差分测试：B 连按两次撤销——
+//   正确实现：第 1 次删 B 自己那笔（1 笔），第 2 次 B 已无可撤销 → 被拒绝（仍是 1 笔）；
+//   旧实现（盲删最后一笔）：第 2 次会把 A 那笔也删掉 → 变成 0 笔。
+await B.locator('button', { hasText: '撤销' }).first().click()
+await A.waitForTimeout(700); await B.waitForTimeout(700)
+check('B 撤销一次后剩 1 笔（撤的是自己的）', (await strokes(A)) === 1 && (await strokes(B)) === 1, `A=${await strokes(A)} B=${await strokes(B)}`)
+await B.locator('button', { hasText: '撤销' }).first().click()
+await A.waitForTimeout(700); await B.waitForTimeout(700)
+check('【关键】B 再撤销一次被拒绝，笔数仍是 1（A 的笔画被保住；盲删实现会变 0）',
+  (await strokes(A)) === 1 && (await strokes(B)) === 1, `A=${await strokes(A)} B=${await strokes(B)}`)
 await A.screenshot({ path: '/tmp/uishot/35-wb-undo.png' })
 
 // ---------- ② 缩放 ----------
@@ -65,11 +67,26 @@ await A.locator('button[title="缩小"]').click(); await A.locator('button[title
 check('点两次缩小 → 80%', (await pct(A)) === '80%', await pct(A))
 await A.locator('button[title="重置为 100%"]').click(); await A.waitForTimeout(300)
 check('点百分比重置回 100%', (await pct(A)) === '100%', await pct(A))
-// 缩放后仍能画（坐标变换没坏）
+// 缩放后仍能画（坐标变换没坏）：用相对断言，避免依赖前面累计的笔数
+const beforeDraw = await strokes(A)
 await draw(A, [500, 400], [800, 500])
-check('缩放后仍能正常绘制（笔数 +1）', (await strokes(A)) === 2, `笔数=${await strokes(A)}`)
+check('缩放后仍能正常绘制（笔数 +1）', (await strokes(A)) === beforeDraw + 1, `${beforeDraw} → ${await strokes(A)}`)
 check('缩放是本地视图，不影响对方（B 仍是 100%）', (await pct(B)) === '100%', `B=${await pct(B)}`)
 await A.screenshot({ path: '/tmp/uishot/36-wb-zoom.png' })
+
+// ---------- ③ 迟到者从入会快照恢复白板（原来由旧探针覆盖）----------
+await B.reload({ waitUntil: 'domcontentloaded' })
+// 刷新后应用会**自动回到会议**（sessionStorage 里存了入会信息），不需要再点"加入会议"
+await B.waitForTimeout(9000)
+check('刷新后自动回到会议', /离开/.test(await B.evaluate(() => document.body.innerText)))
+await openBoard(B)
+const beforeReload = await strokes(A)
+check('迟到加入（刷新重进）后能看到已有笔迹', (await strokes(B)) === beforeReload, `刷新前 ${beforeReload} / 刷新后 B=${await strokes(B)}`)
+
+// ---------- ④ 清空对所有人一致（原来由旧探针覆盖）----------
+await A.locator('button', { hasText: '清空' }).first().click() // confirm 由上面的 dialog 处理器接受
+await A.waitForTimeout(1500); await B.waitForTimeout(1500)
+check('清空后双方都看到 0 笔', (await strokes(A)) === 0 && (await strokes(B)) === 0, `A=${await strokes(A)} B=${await strokes(B)}`)
 
 await bA.close(); await bB.close()
 const pass = results.filter(([ok]) => ok).length
