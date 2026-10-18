@@ -45,6 +45,8 @@ export function LoginPage({ onLogin, onRegister, invitedRoom, previewNotice }: L
     try { return !!sessionStorage.getItem(REMEMBER_KEY) } catch { return false }
   })
   const [error, setError] = useState<string | null>(null)
+  /** "忘记密码"点开后的内联提示：之前是个长得像链接的 span，点了没反应 */
+  const [forgotOpen, setForgotOpen] = useState(false)
   const [errorField, setErrorField] = useState<'username' | 'password' | 'confirm' | null>(null)
   // 乐观默认 true：本地开发（默认开放注册）不会出现"入口闪一下才出现"。
   // 服务端说没有，再收起来。
@@ -331,12 +333,21 @@ export function LoginPage({ onLogin, onRegister, invitedRoom, previewNotice }: L
                     <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} disabled={busy} />
                     <span>记住用户名</span>
                   </label>
-                  <span className="login-forgot" title="如忘记密码，请联系管理员重置">忘记密码？</span>
+                  <button
+                    type="button"
+                    className="login-forgot"
+                    title="查看找回方式"
+                    aria-expanded={forgotOpen}
+                    onClick={() => setForgotOpen((v) => !v)}
+                  >忘记密码？</button>
                 </div>
               )}
 
               {/* 错误信息 */}
               <p id="login-error" className="login-error" role="alert">{error}</p>
+              {forgotOpen && !isSignup && (
+                <p className="login-forgot-tip" role="note">暂不支持自助找回，请联系管理员重置密码。</p>
+              )}
 
               {/* 提交按钮 */}
               <button type="submit" className="login-submit" disabled={busy}>

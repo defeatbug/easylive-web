@@ -52,7 +52,7 @@
   --line-strong: rgba(255, 255, 255, 0.18);
   --text: #e9ebee;
   --text-dim: #a9afb9;
-  --text-mute: #7d848f;
+  --text-mute: #8b929e;
   --brand-tint: rgba(4, 153, 253, 0.18);
   --shadow-card: 0 2px 12px rgba(0, 0, 0, 0.35);
   --shadow-pop: 0 12px 36px rgba(0, 0, 0, 0.5);
@@ -108,9 +108,9 @@ body {
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-card);
   transition:
-    box-shadow 0.16s ease,
-    transform 0.16s ease,
-    border-color 0.16s ease;
+    box-shadow 0.15s ease,
+    transform 0.15s ease,
+    border-color 0.15s ease;
 }
 .tm-card-hover:hover {
   border-color: var(--brand);
@@ -129,8 +129,8 @@ body {
   color: var(--text);
   outline: none;
   transition:
-    border-color 0.14s ease,
-    box-shadow 0.14s ease;
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 .tm-input::placeholder {
   color: var(--text-mute);
@@ -147,7 +147,7 @@ body {
   border-radius: var(--radius);
   font-weight: 500;
   transition:
-    background 0.14s ease,
+    background 0.15s ease,
     transform 0.06s ease;
 }
 .tm-btn-primary:hover:not(:disabled) {
@@ -170,9 +170,9 @@ body {
   color: var(--text);
   font-weight: 500;
   transition:
-    border-color 0.14s ease,
-    background 0.14s ease,
-    color 0.14s ease;
+    border-color 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease;
 }
 .tm-btn:hover:not(:disabled) {
   border-color: var(--brand);
@@ -232,19 +232,19 @@ body {
 /* 关闭态（静音/关摄像头）用红色语义，和腾讯会议一致 */
 /* 录制中：红色语义（与"关闭态"共用红色家族，但更醒目，因为它是持续状态） */
 .tm-tool-recording {
-  color: #ff5c5c;
-  background: rgba(229, 72, 77, 0.14);
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
 }
 .tm-tool-recording:hover:not(:disabled) {
-  color: #ff7a7a;
-  background: rgba(229, 72, 77, 0.2);
+  color: color-mix(in srgb, var(--danger) 75%, white);
+  background: color-mix(in srgb, var(--danger) 20%, transparent);
 }
 
 .tm-tool-off {
   color: var(--danger);
 }
 .tm-tool-off:hover:not(:disabled) {
-  background: rgba(229, 72, 77, 0.14);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
   color: var(--danger);
 }
 
@@ -598,6 +598,8 @@ body {
 .prejoin-device-status span { width:6px; height:6px; border-radius:50%; background:#a1afc0; }
 .prejoin-device-status.is-ready { background:#eaf8f2; color:#178353; }
 .prejoin-device-status.is-ready span { background:#22aa70; }
+.prejoin-device-status.is-error { background:#fdeeee; color:#c03636; }
+.prejoin-device-status.is-error span { background:#e5484d; }
 .prejoin-camera-stage { position:relative; aspect-ratio:16/10; width:100%; overflow:hidden; border-radius:14px; background:radial-gradient(circle at 50% 42%,#303e58,#141f33 67%); }
 .prejoin-camera-stage::after { position:absolute; inset:0; pointer-events:none; content:''; background:linear-gradient(180deg,rgba(7,15,30,.25),transparent 30%,transparent 60%,rgba(7,15,30,.5)); }
 .prejoin-video { width:100%; height:100%; object-fit:cover; transform:scaleX(-1); }
@@ -840,8 +842,9 @@ body {
 .login-remember input { width:15px; height:15px; margin:0; accent-color:#1768ee; cursor:pointer; }
 .login-remember input:disabled { cursor:wait; }
 .login-remember:hover input:not(:disabled) ~ span { color:#1768ee; }
-.login-forgot { color:#1768ee; font-size:12px; font-weight:550; cursor:pointer; transition:opacity .14s; white-space:nowrap; }
+.login-forgot { color:#1768ee; font-size:12px; font-weight:550; cursor:pointer; transition:opacity .15s; white-space:nowrap; background:none; border:none; padding:0; font-family:inherit; }
 .login-forgot:hover { opacity:.75; text-decoration:underline; }
+.login-forgot-tip { margin:-2px 0 0; font-size:12px; line-height:1.55; color:var(--text-dim); background:var(--surface-2); border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
 .login-error { min-height:19px; margin:-4px 0 -7px; color:#b42335; font-size:12px; line-height:1.55; }
 .login-submit { display:flex; align-items:center; justify-content:center; gap:10px; height:52px; border:none; border-radius:10px; background:#1768ee; color:#fff; font-size:14px; font-weight:650; box-shadow:0 9px 18px rgba(23,104,238,.2); transition:background .16s,transform .16s,box-shadow .16s; cursor:pointer; }
 .login-submit:hover:not(:disabled) { background:#0959de; transform:translateY(-1px); box-shadow:0 11px 22px rgba(23,104,238,.27); }
