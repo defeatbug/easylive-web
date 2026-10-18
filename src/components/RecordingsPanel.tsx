@@ -93,7 +93,7 @@ export function RecordingsPanel({ onLoad, onClose }: RecordingsPanelProps) {
 
           {!loading && data === null && (
             <p className="py-8 text-center text-xs text-red-400">
-              无法读取录制列表（服务端未响应；生产环境下 /recordings 需要 X-API-Key）
+              无法读取录制列表（服务端未响应；请确认已登录，或由运维带上 X-API-Key）
             </p>
           )}
 
