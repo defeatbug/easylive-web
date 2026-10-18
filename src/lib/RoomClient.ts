@@ -1264,7 +1264,9 @@ export class RoomClient {
         this.update({ whiteboard: [] })
         break
       case 'undo':
-        this.update({ whiteboard: cur.slice(0, -1) })
+        // 服务端现在按绘制者归属撤销，并带上被撤销那一笔的 seq；
+        // 按 seq 精确删除，兼容收不到 undoSeq 的旧服务端（回退为弹最后一笔）
+        this.update({ whiteboard: op.undoSeq ? cur.filter((o) => o.seq !== op.undoSeq) : cur.slice(0, -1) })
         break
       default:
         this.update({ whiteboard: [...cur, op] })
