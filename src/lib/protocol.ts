@@ -22,6 +22,7 @@ export type MsgType =
   | 'moderate' // 主持人操作：mute | kick（需要 roomAdmin）
   | 'record' // 录制开关：start | stop（需要 roomAdmin）
   | 'whiteboard' // 白板操作：{op:{kind,stroke}}（任何参会者都可画）
+  | 'ai_summary' // AI 总结开关：{action: start|stop}（任何参会者）
   // 服务端 -> 客户端
   | 'joined'
   | 'flash_message' // 服务端广播的弹幕/互动 {flash}
@@ -39,6 +40,8 @@ export type MsgType =
   | 'chat_message'
   | 'recording_state' // 服务端广播录制状态（全员可见的"录制中"红点）
   | 'whiteboard_op' // 服务端广播一条被接受的白板操作（带 by/seq）
+  | 'ai_summary_state' // 服务端广播 AI 总结状态（开关 + 当前纪要）
+  | 'ai_summary_update' // 服务端推送纪要内容更新
   | 'pong'
   | 'error'
 
@@ -134,6 +137,21 @@ export interface RoomState {
   hands?: string[]
   /** 房间当前的白板内容（入会快照携带：中途进来的人也能看到已画的内容） */
   whiteboard?: WhiteboardOp[]
+  /** AI 总结状态（入会快照携带，中途进来的人能看到当前纪要） */
+  aiSummary?: AISummaryState
+}
+
+/** AI 会议总结状态：开关 + 实时更新的 markdown 纪要（与 Go protocol.AISummaryState 1:1） */
+export interface AISummaryState {
+  active: boolean
+  startedAt?: number
+  startedBy?: string
+  startedByName?: string
+  /** 当前纪要全文（markdown） */
+  markdown?: string
+  updatedAt?: number
+  /** 已转写片段数 */
+  segmentCount?: number
 }
 
 /**
@@ -242,6 +260,8 @@ export interface Message {
   participant?: PeerInfo
   room?: RoomState
   recording?: RecordingState
+  /** AI 总结载荷（ai_summary / ai_summary_state / ai_summary_update） */
+  aiSummary?: AISummaryState
   /** 白板操作载荷（whiteboard / whiteboard_op） */
   op?: WhiteboardOp
   /** 服务端实际生效的权限（joined 下发；无鉴权模式为全权限 devGrants） */

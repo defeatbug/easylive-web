@@ -977,3 +977,17 @@ body {
 
 /* 鼠标点击不显示聚焦环：只有键盘操作（:focus-visible）才显示，避免"点一下就亮一圈" */
 :where(.meeting-toolbar, .reaction-dock) button:focus:not(:focus-visible) { outline: none; }
+
+/* AI 纪要文档排版（renderMarkdown 输出的 .md-doc） */
+.md-doc h1 { font-size: 1.15rem; font-weight: 700; margin: 0.2em 0 0.6em; }
+.md-doc h2 { font-size: 1rem; font-weight: 700; margin: 1em 0 0.4em; padding-bottom: 0.25em; border-bottom: 1px solid rgb(255 255 255 / 0.08); }
+.md-doc h3 { font-size: 0.9rem; font-weight: 700; margin: 0.8em 0 0.3em; }
+.md-doc p { margin: 0.4em 0; }
+.md-doc ul, .md-doc ol { margin: 0.4em 0; padding-left: 1.4em; }
+.md-doc li { margin: 0.25em 0; }
+.md-doc li.md-task { list-style: none; margin-left: -1.4em; }
+.md-doc li.md-task input { margin-right: 0.4em; accent-color: var(--brand); }
+.md-doc blockquote { margin: 0.4em 0; padding: 0.2em 0.8em; border-left: 3px solid var(--brand); color: var(--text-mute); }
+.md-doc code { padding: 0.1em 0.35em; border-radius: 4px; background: rgb(255 255 255 / 0.08); font-size: 0.85em; }
+.md-doc hr { margin: 0.8em 0; border: none; border-top: 1px solid rgb(255 255 255 / 0.1); }
+.md-doc strong { font-weight: 700; }

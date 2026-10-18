@@ -95,6 +95,14 @@ export const IconWhiteboard = (p: IconProps) => (
   </Svg>
 )
 
+export const IconAISummary = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="4" y="3" width="12" height="18" rx="2" />
+    <path d="M7.5 8h5M7.5 11.5h5M7.5 15h3" />
+    <path d="M18.5 13.5l.9 2.4 2.4.9-2.4.9-.9 2.4-.9-2.4-2.4-.9 2.4-.9z" />
+  </Svg>
+)
+
 export const IconRecord = (p: IconProps) => (
   <Svg {...p}>
     <circle cx="12" cy="12" r="8.5" />

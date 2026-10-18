@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { candidateTypeLabel } from '../lib/RoomClient'
-import type { ChatMessage, PeerInfo, SpeakerInfo } from '../lib/protocol'
+import type { AISummaryState, ChatMessage, PeerInfo, SpeakerInfo } from '../lib/protocol'
 import type { LinkStats } from '../lib/RoomClient'
 import { evaluateQuality } from '../lib/quality'
 import { useImeGuard } from '../lib/ime'
+import { AISummaryPanel } from './AISummaryPanel'
 
 interface SidePanelProps {
-  tab: 'chat' | 'people' | 'stats'
-  onTabChange: (tab: 'chat' | 'people' | 'stats') => void
+  tab: 'chat' | 'people' | 'stats' | 'ai'
+  onTabChange: (tab: 'chat' | 'people' | 'stats' | 'ai') => void
   onClose: () => void
   chat: ChatMessage[]
   selfId: string | null
@@ -21,6 +22,11 @@ interface SidePanelProps {
   onModerate: (action: 'mute' | 'kick', targetId: string) => void
   stats: LinkStats | null
   onSend: (text: string) => void
+  /** AI 总结状态（服务端推送） */
+  aiSummary: AISummaryState
+  onStartAISummary: () => void
+  onStopAISummary: () => void
+  aiStarting: boolean
 }
 
 /**
@@ -41,6 +47,10 @@ export function SidePanel({
   onModerate,
   stats,
   onSend,
+  aiSummary,
+  onStartAISummary,
+  onStopAISummary,
+  aiStarting,
 }: SidePanelProps) {
   return (
     <aside className="meeting-sidepanel flex w-80 shrink-0 flex-col border-l border-white/5 bg-[var(--surface)]">
@@ -54,6 +64,9 @@ export function SidePanel({
           </TabButton>
           <TabButton active={tab === 'stats'} onClick={() => onTabChange('stats')}>
             指标
+          </TabButton>
+          <TabButton active={tab === 'ai'} onClick={() => onTabChange('ai')}>
+            AI 总结
           </TabButton>
         </div>
         <button
@@ -79,6 +92,14 @@ export function SidePanel({
         />
       )}
       {tab === 'stats' && <StatsView stats={stats} />}
+      {tab === 'ai' && (
+        <AISummaryPanel
+          summary={aiSummary}
+          onStart={onStartAISummary}
+          onStop={onStopAISummary}
+          starting={aiStarting}
+        />
+      )}
     </aside>
   )
 }
