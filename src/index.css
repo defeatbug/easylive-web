@@ -192,7 +192,9 @@ body {
   cursor: not-allowed;
 }
 
-/* 会中底部工具栏按钮：图标在上、文字在下，深色胶囊 */
+/* 会中底部工具栏按钮：图标在上、文字在下，深色胶囊。
+   悬停语言统一：背景加深一档 + 文字变亮，0.15s ease 过渡；
+   语义色按钮（录制/退出/关闭态）保留各自颜色，只统一过渡与反馈强度。 */
 .tm-tool {
   display: flex;
   flex-direction: column;
@@ -207,8 +209,8 @@ body {
   font-size: 11px;
   line-height: 1;
   transition:
-    background 0.14s ease,
-    color 0.14s ease;
+    background 0.15s ease,
+    color 0.15s ease;
 }
 .tm-tool:hover:not(:disabled) {
   background: var(--surface-3);
@@ -225,7 +227,7 @@ body {
 }
 .tm-tool-active:hover:not(:disabled) {
   color: var(--brand);
-  background: var(--brand-tint);
+  background: color-mix(in srgb, var(--brand-tint) 80%, var(--brand));
 }
 /* 关闭态（静音/关摄像头）用红色语义，和腾讯会议一致 */
 /* 录制中：红色语义（与"关闭态"共用红色家族，但更醒目，因为它是持续状态） */
@@ -244,6 +246,16 @@ body {
 .tm-tool-off:hover:not(:disabled) {
   background: rgba(229, 72, 77, 0.14);
   color: var(--danger);
+}
+
+/* 退出会议按钮：危险语义，悬停语言与工具栏统一（背景变化 + 0.15s 过渡） */
+.tm-leave {
+  background: var(--danger);
+  color: #fff;
+  transition: background 0.15s ease;
+}
+.tm-leave:hover {
+  background: color-mix(in srgb, var(--danger) 85%, white);
 }
 
 /* 会议中的视频瓦片 */
@@ -306,7 +318,7 @@ body {
   font-size: 13px;
   font-weight: 500;
   color: var(--text);
-  transition: background 0.14s ease;
+  transition: background 0.15s ease;
 }
 .tm-picker-main:hover {
   background: var(--picker-bg-hover);
@@ -319,7 +331,7 @@ body {
   align-items: center;
   padding: 0 8px;
   color: var(--text-dim);
-  transition: background 0.14s ease, color 0.14s ease;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 .tm-picker-arrow:hover:not(:disabled) {
   background: var(--picker-bg-hover);
@@ -375,6 +387,9 @@ body {
   width: 14px;
   justify-content: center;
 }
+.tm-picker-arrow-tool:hover:not(:disabled) {
+  background: transparent;
+}
 
 /* 设备下拉浮层 */
 .tm-menu {
@@ -398,7 +413,7 @@ body {
   text-align: left;
   font-size: 12px;
   color: var(--text);
-  transition: background 0.12s ease;
+  transition: background 0.15s ease;
 }
 .tm-menu-item:hover {
   background: var(--surface-2);
@@ -494,6 +509,7 @@ body {
   }
   .tm-menu,
   .tm-tool,
+  .tm-leave,
   .tm-btn,
   .tm-picker-main {
     transition-duration: 0.01ms !important;
