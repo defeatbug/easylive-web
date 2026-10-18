@@ -14,13 +14,28 @@ interface WhiteboardProps {
 }
 
 const COLORS = ['#1b1d21', '#e5484d', '#f5a524', '#22c55e', '#0273fe', '#a855f7']
-const TOOLS: { id: WhiteboardTool; label: string }[] = [
+/**
+ * 工具栏上的工具 = 绘制工具 + 抓手。
+ * 抓手是纯本地视图模式（拖拽平移），永远不产生笔画、不过网——
+ * 所以不进 protocol 的 WhiteboardTool，也就碰不到 Go 端的工具白名单。
+ */
+type WhiteboardUiTool = WhiteboardTool | 'hand'
+
+const TOOLS: { id: WhiteboardUiTool; label: string }[] = [
+  { id: 'hand', label: '抓手' },
   { id: 'pen', label: '画笔' },
   { id: 'eraser', label: '橡皮' },
   { id: 'line', label: '直线' },
   { id: 'rect', label: '矩形' },
   { id: 'ellipse', label: '椭圆' },
 ]
+
+/** 视图变换（本地状态，不广播：各人看各的缩放/平移）。世界→屏幕（归一化空间）：s = p * k + t */
+interface ViewTransform {
+  k: number
+  tx: number
+  ty: number
+}
 
 /**
  * 白板（会中共用）。
@@ -59,13 +74,24 @@ export function Whiteboard({ ops, selfId, nameOf, onOp, onClose }: WhiteboardPro
   const pendingRef = useRef<WhiteboardStroke[]>([])
   /** 已确认的"我方笔迹"数：用它精确地把队列里的待确认项出队 */
   const confirmedSelfRef = useRef(0)
-  const drawRef = useRef<{ tool: WhiteboardTool; color: string; width: number; start: [number, number] | null }>({
+  const drawRef = useRef<{ tool: WhiteboardUiTool; color: string; width: number; start: [number, number] | null }>({
     tool: 'pen',
     color: COLORS[0],
     width: 3,
     start: null,
   })
-  const [tool, setTool] = useState<WhiteboardTool>('pen')
+  const [tool, setTool] = useState<WhiteboardUiTool>('pen')
+  /** 视图变换：本地状态。渲染时直接作为 canvas transform，所以 paintStroke / stroke.ts 一行不用改，
+   *  线宽也会随缩放自然变化（和 Excalidraw / Miro 一致的世界坐标语义）。 */
+  const [view, setView] = useState<ViewTransform>({ k: 1, tx: 0, ty: 0 })
+  const viewRef = useRef(view)
+  /** 正在平移（光标切换 grabbing；与 panRef 区分：这个只管 UI） */
+  const [panning, setPanning] = useState(false)
+  /** 空格是否按住（按住空格拖拽也能平移，Figma 式） */
+  const [spaceHeld, setSpaceHeld] = useState(false)
+  const spaceRef = useRef(false)
+  /** 平移手势进行中：起点屏幕坐标 + 起点视图 */
+  const panRef = useRef<{ startX: number; startY: number; tx: number; ty: number } | null>(null)
   const [color, setColor] = useState(COLORS[0])
   const [width, setWidth] = useState(3)
   const [hint, setHint] = useState<string | null>(null)
@@ -153,7 +179,7 @@ export function Whiteboard({ ops, selfId, nameOf, onOp, onClose }: WhiteboardPro
     ctx.restore()
   }
 
-  /** 重画"已提交层"（只在 ops 变化或尺寸变化时调用）。 */
+  /** 重画"已提交层"（ops / 尺寸 / 视图变化时调用）。 */
   const repaintCommitted = () => {
     const off = committedRef.current
     if (!off) return
@@ -161,7 +187,12 @@ export function Whiteboard({ ops, selfId, nameOf, onOp, onClose }: WhiteboardPro
     if (!ctx) return
     ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.clearRect(0, 0, off.width, off.height)
+    // 视图变换：世界(归一化)→设备像素。paintStroke 按原逻辑画"世界坐标"即可，
+    // transform 会把它搬到屏幕正确位置，线宽也随缩放自然变化。
+    const v = viewRef.current
+    ctx.setTransform(v.k, 0, 0, v.k, v.tx * off.width, v.ty * off.height)
     for (const op of ops) if (op.kind === 'stroke' && op.stroke) paintStroke(ctx, op.stroke, off.width, off.height)
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
   }
 
   /** 可见画布 = 已提交层 + 当前这一笔。 */
@@ -174,10 +205,47 @@ export function Whiteboard({ ops, selfId, nameOf, onOp, onClose }: WhiteboardPro
     ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.clearRect(0, 0, canvas.width, canvas.height)
     ctx.drawImage(off, 0, 0)
-    // 顺序：全部待确认的笔画 → 正在画的那一笔
+    // 顺序：全部待确认的笔画 → 正在画的那一笔（同样走视图变换）
+    const v = viewRef.current
+    ctx.setTransform(v.k, 0, 0, v.k, v.tx * canvas.width, v.ty * canvas.height)
     for (const p of pendingRef.current) paintStroke(ctx, p, canvas.width, canvas.height)
     if (liveRef.current) paintStroke(ctx, liveRef.current, canvas.width, canvas.height)
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
   }
+
+  /** 设置视图并重绘（paintStroke 从 viewRef 读变换）。 */
+  const setViewAndRepaint = (v: ViewTransform) => {
+    viewRef.current = v
+    setView(v)
+    repaintCommitted()
+    repaint()
+  }
+
+  /** 以屏幕上一点为中心缩放（滚轮 / 按钮共用）：光标下的世界点保持不动。 */
+  const zoomAt = (clientX: number, clientY: number, factor: number) => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const rect = canvas.getBoundingClientRect()
+    const sx = (clientX - rect.left) / Math.max(1, rect.width)
+    const sy = (clientY - rect.top) / Math.max(1, rect.height)
+    const v = viewRef.current
+    const k2 = Math.min(8, Math.max(0.5, v.k * factor))
+    if (k2 === v.k) return
+    const wx = (sx - v.tx) / v.k
+    const wy = (sy - v.ty) / v.k
+    setViewAndRepaint({ k: k2, tx: sx - wx * k2, ty: sy - wy * k2 })
+  }
+
+  /** 以画布中心缩放（缩放按钮用）。 */
+  const zoomCenter = (factor: number) => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const rect = canvas.getBoundingClientRect()
+    zoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, factor)
+  }
+
+  /** 回到 100% / 无平移。 */
+  const resetView = () => setViewAndRepaint({ k: 1, tx: 0, ty: 0 })
 
   // 尺寸与 ops 变化时重绘
   useEffect(() => {
@@ -197,6 +265,41 @@ export function Whiteboard({ ops, selfId, nameOf, onOp, onClose }: WhiteboardPro
     ro.observe(wrap)
     return () => ro.disconnect()
   }, [ops])
+
+  // 滚轮缩放（以光标为中心）：必须用非 passive 监听才能 preventDefault 阻止页面滚动
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0015))
+    }
+    canvas.addEventListener('wheel', onWheel, { passive: false })
+    return () => canvas.removeEventListener('wheel', onWheel)
+  }, [])
+
+  // 空格按住 → 拖拽平移（Figma 式）；输入框里按空格不受影响
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if (e.code !== 'Space' || e.repeat) return
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      spaceRef.current = true
+      setSpaceHeld(true)
+    }
+    const up = (e: KeyboardEvent) => {
+      if (e.code !== 'Space') return
+      spaceRef.current = false
+      setSpaceHeld(false)
+    }
+    window.addEventListener('keydown', down)
+    window.addEventListener('keyup', up)
+    return () => {
+      window.removeEventListener('keydown', down)
+      window.removeEventListener('keyup', up)
+      spaceRef.current = false
+    }
+  }, [])
 
   // ops 变化时：重画已提交层，并把"已被服务端确认的我方笔迹"从待确认队列里出队。
   //
@@ -223,33 +326,56 @@ export function Whiteboard({ ops, selfId, nameOf, onOp, onClose }: WhiteboardPro
     else setHint(null)
   }, [ops.length])
 
-  /** 画布坐标 → 归一化 0..1。 */
-  const toNorm = (e: React.PointerEvent): [number, number] => {
+  /** 屏幕坐标 → 世界坐标（归一化）。不裁剪到 [0,1]：平移后可以在原来的画布之外作画。 */
+  const toWorld = (e: React.PointerEvent): [number, number] => {
     const rect = canvasRef.current!.getBoundingClientRect()
-    const x = (e.clientX - rect.left) / Math.max(1, rect.width)
-    const y = (e.clientY - rect.top) / Math.max(1, rect.height)
-    return [Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, y))]
+    const v = viewRef.current
+    const sx = (e.clientX - rect.left) / Math.max(1, rect.width)
+    const sy = (e.clientY - rect.top) / Math.max(1, rect.height)
+    return [(sx - v.tx) / v.k, (sy - v.ty) / v.k]
   }
 
   const onPointerDown = (e: React.PointerEvent) => {
     const d = drawRef.current
-    const p = toNorm(e)
+    const tool = d.tool
+    // 抓手工具 / 空格+拖拽 / 中键拖拽 → 平移视图，不画画
+    if (tool === 'hand' || spaceRef.current || e.button === 1) {
+      const v = viewRef.current
+      panRef.current = { startX: e.clientX, startY: e.clientY, tx: v.tx, ty: v.ty }
+      ;(e.target as HTMLElement).setPointerCapture?.(e.pointerId)
+      setPanning(true)
+      return
+    }
+    const p = toWorld(e)
     d.start = p
     ;(e.target as HTMLElement).setPointerCapture?.(e.pointerId)
-    // 只有按下才开始接收采样点
-    liveRef.current = { tool: d.tool, color: d.color, width: d.width, points: [p] }
+    // 只有按下才开始接收采样点（这里 tool 已收窄为 WhiteboardTool，抓手不会产生笔画）
+    liveRef.current = { tool, color: d.color, width: d.width, points: [p] }
     repaint()
   }
 
   const onPointerMove = (e: React.PointerEvent) => {
+    // 平移中：屏幕位移直接换算成归一化位移（tx/ty 本来就是归一化单位）
+    const pan = panRef.current
+    if (pan) {
+      const rect = canvasRef.current!.getBoundingClientRect()
+      const v = viewRef.current
+      setViewAndRepaint({
+        ...v,
+        tx: pan.tx + (e.clientX - pan.startX) / Math.max(1, rect.width),
+        ty: pan.ty + (e.clientY - pan.startY) / Math.max(1, rect.height),
+      })
+      return
+    }
     const live = liveRef.current
     const d = drawRef.current
     if (!live) return
-    const p = toNorm(e)
+    const p = toWorld(e)
     if (d.tool === 'pen' || d.tool === 'eraser') {
-      // 距离阈值：太密的点既占带宽也占渲染，2px 归一化后约等于视觉无损
+      // 距离阈值：太密的点既占带宽也占渲染；按缩放折算——放大后同样的世界距离
+      // 对应更多屏幕像素，阈值要变小，否则线条在高缩放下会发折
       const last = live.points[live.points.length - 1]
-      if (Math.abs(p[0] - last[0]) + Math.abs(p[1] - last[1]) < 0.002) return
+      if (Math.abs(p[0] - last[0]) + Math.abs(p[1] - last[1]) < 0.002 / viewRef.current.k) return
       if (live.points.length >= 400) return
       live.points.push(p)
     } else if (d.start) {
@@ -257,6 +383,16 @@ export function Whiteboard({ ops, selfId, nameOf, onOp, onClose }: WhiteboardPro
       live.points = [d.start, p]
     }
     repaint()
+  }
+
+  /** 抬手：平移就结束平移，否则走原来的收笔流程。 */
+  const onPointerUp = () => {
+    if (panRef.current) {
+      panRef.current = null
+      setPanning(false)
+      return
+    }
+    finishStroke()
   }
 
   const finishStroke = () => {
@@ -380,12 +516,18 @@ export function Whiteboard({ ops, selfId, nameOf, onOp, onClose }: WhiteboardPro
           <canvas
             ref={canvasRef}
             className="absolute inset-0 h-full w-full touch-none"
-            style={{ cursor: tool === 'eraser' ? 'cell' : 'crosshair' }}
+            style={{
+              cursor:
+                panning || spaceHeld ? 'grabbing'
+                : tool === 'hand' ? 'grab'
+                : tool === 'eraser' ? 'cell'
+                : 'crosshair',
+            }}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
-            onPointerUp={finishStroke}
-            onPointerCancel={finishStroke}
-            onPointerLeave={finishStroke}
+            onPointerUp={onPointerUp}
+            onPointerCancel={onPointerUp}
+            onPointerLeave={onPointerUp}
           />
           {ops.length === 0 && !liveRef.current && pendingRef.current.length === 0 && (
             <p className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-neutral-400">
@@ -397,6 +539,12 @@ export function Whiteboard({ ops, selfId, nameOf, onOp, onClose }: WhiteboardPro
               {hint}
             </p>
           )}
+          {/* 缩放控件：右下角浮动（本地视图，不影响他人） */}
+          <div className="absolute bottom-3 right-3 z-10 flex items-center gap-0.5 rounded-lg border border-[var(--line)] bg-[var(--surface)]/92 px-1 py-0.5 text-[12px] text-[var(--text-dim)] shadow backdrop-blur">
+            <button type="button" title="缩小" aria-label="缩小" className="rounded px-2 py-0.5 hover:bg-[var(--surface-2)]" onClick={() => zoomCenter(1 / 1.25)}>−</button>
+            <button type="button" title="重置为 100%" className="min-w-11 rounded px-1 py-0.5 tabular-nums hover:bg-[var(--surface-2)]" onClick={resetView}>{Math.round(view.k * 100)}%</button>
+            <button type="button" title="放大" aria-label="放大" className="rounded px-2 py-0.5 hover:bg-[var(--surface-2)]" onClick={() => zoomCenter(1.25)}>+</button>
+          </div>
           </div>
         </div>
 
