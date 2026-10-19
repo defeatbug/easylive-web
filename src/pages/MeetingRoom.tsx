@@ -14,6 +14,7 @@ import { useRoom } from '../hooks/useRoom'
 import { useDevices, type DeviceSelection } from '../lib/devices'
 import type { LinkStats } from '../lib/RoomClient'
 import { evaluateQuality } from '../lib/quality'
+import { AI_AGENT_ID } from '../lib/protocol'
 
 interface MeetingRoomProps {
   roomId: string
@@ -33,6 +34,8 @@ interface MeetingRoomProps {
 interface Tile {
   /** 已设置头像时用它替代首字母（服务端下发） */
   avatarUrl?: string
+  /** emoji 头像（如 AI 助手的 🤖） */
+  avatarEmoji?: string
   key: string
   label: string
   stream: MediaStream | null
@@ -160,6 +163,8 @@ export function MeetingRoom({
         key: `cam-${p.id}`,
         label: p.name,
         avatarUrl: p.avatarUrl,
+        // AI 助手用 🤖 做头像（它没有视频画面，瓦片平时就是头像态）
+        avatarEmoji: p.id === AI_AGENT_ID ? '🤖' : undefined,
         // 摄像头被对方关掉时给 null，让瓦片显示头像而不是黑屏
         stream: cam && !cam.muted ? (snapshot.remoteStreams[cam.id] ?? null) : null,
         isLocal: false,
@@ -513,6 +518,7 @@ export function MeetingRoom({
             }}
             onSend={(t) => client?.sendChat(t)}
             aiSummary={snapshot.aiSummary}
+            aiAgent={snapshot.aiAgent}
             aiStarting={aiStarting}
             onStartAISummary={() => {
               if (aiStarting) return
@@ -591,6 +597,7 @@ function GridView({ tiles }: { tiles: Tile[] }) {
           stream={t.stream}
           label={t.label}
           avatarUrl={t.avatarUrl}
+          avatarEmoji={t.avatarEmoji}
           mirrored={t.isLocal && !t.screen}
           muted={t.muted}
           badge={t.badge}
@@ -694,6 +701,7 @@ function StageWithPip({
         stream={stage.stream}
         label={stage.label}
         avatarUrl={stage.avatarUrl}
+        avatarEmoji={stage.avatarEmoji}
         screen={stage.screen}
         mirrored={stage.isLocal && !stage.screen}
         muted={stage.muted}
@@ -774,6 +782,7 @@ function SidebarLayout({
             <VideoTile
               stream={t.stream}
               label={t.label}
+              avatarEmoji={t.avatarEmoji}
               screen={t.screen}
               muted={t.muted}
               badge={t.badge}
@@ -787,6 +796,7 @@ function SidebarLayout({
         <VideoTile
           stream={active.stream}
           label={active.label}
+          avatarEmoji={active.avatarEmoji}
           screen={active.screen}
           mirrored={active.isLocal && !active.screen}
           muted={active.muted}

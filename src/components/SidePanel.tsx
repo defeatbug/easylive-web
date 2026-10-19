@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { candidateTypeLabel } from '../lib/RoomClient'
-import type { AISummaryState, ChatMessage, PeerInfo, SpeakerInfo } from '../lib/protocol'
+import type { AIAgentState, AISummaryState, ChatMessage, PeerInfo, SpeakerInfo } from '../lib/protocol'
+import { AI_AGENT_ID } from '../lib/protocol'
 import type { LinkStats } from '../lib/RoomClient'
 import { evaluateQuality } from '../lib/quality'
 import { useImeGuard } from '../lib/ime'
@@ -24,6 +25,8 @@ interface SidePanelProps {
   onSend: (text: string) => void
   /** AI 总结状态（服务端推送） */
   aiSummary: AISummaryState
+  /** AI 问答助手状态（服务端 ai_agent_state 广播） */
+  aiAgent: AIAgentState
   onStartAISummary: () => void
   onStopAISummary: () => void
   aiStarting: boolean
@@ -48,6 +51,7 @@ export function SidePanel({
   stats,
   onSend,
   aiSummary,
+  aiAgent,
   onStartAISummary,
   onStopAISummary,
   aiStarting,
@@ -80,7 +84,7 @@ export function SidePanel({
         </button>
       </div>
 
-      {tab === 'chat' && <ChatList chat={chat} selfId={selfId} onSend={onSend} />}
+      {tab === 'chat' && <ChatList chat={chat} selfId={selfId} onSend={onSend} aiAgent={aiAgent} />}
       {tab === 'people' && (
         <PeopleList
           participants={participants}
@@ -129,10 +133,12 @@ function ChatList({
   chat,
   selfId,
   onSend,
+  aiAgent,
 }: {
   chat: ChatMessage[]
   selfId: string | null
   onSend: (text: string) => void
+  aiAgent: AIAgentState
 }) {
   const [text, setText] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
@@ -149,12 +155,15 @@ function ChatList({
     setText('')
   }
 
+  const aiBusy = aiAgent.state === 'thinking' || aiAgent.state === 'speaking'
+
   return (
     <>
       <div className="flex-1 space-y-3 overflow-y-auto px-3 py-2">
         {chat.length === 0 && <p className="pt-8 text-center text-xs text-neutral-500">还没有消息</p>}
         {chat.map((m, i) => {
           const mine = m.fromId === selfId
+          const isAI = m.fromId === AI_AGENT_ID
           return (
             <div key={`${m.ts}-${i}`} className={`flex flex-col gap-1 ${mine ? 'items-end' : 'items-start'}`}>
               <span className="px-1 text-[10px] text-neutral-500">
@@ -162,9 +171,14 @@ function ChatList({
               </span>
               <div
                 className={`max-w-[85%] rounded-lg px-3 py-1.5 text-sm leading-relaxed ${
-                  mine ? 'bg-[var(--brand)] text-white' : 'bg-[var(--surface-2)] text-neutral-100'
+                  mine
+                    ? 'bg-[var(--brand)] text-white'
+                    : isAI
+                      ? 'border border-violet-400/30 bg-violet-500/10 text-neutral-100'
+                      : 'bg-[var(--surface-2)] text-neutral-100'
                 }`}
               >
+                {isAI && <span className="mr-1">🤖</span>}
                 {m.text}
               </div>
             </div>
@@ -172,6 +186,13 @@ function ChatList({
         })}
         <div ref={bottomRef} />
       </div>
+      {/* AI 助手状态：thinking（正在想）/ speaking（正在语音回答）时给个轻提示 */}
+      {aiBusy && (
+        <div className="flex items-center gap-2 px-4 py-1.5 text-xs text-violet-300/80">
+          <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-violet-400" />
+          {aiAgent.state === 'thinking' ? '🤖 AI 助手正在思考…' : '🤖 AI 助手正在语音回答…'}
+        </div>
+      )}
       <div className="flex gap-2 border-t border-white/5 p-3">
         <input
           value={text}
@@ -185,7 +206,7 @@ function ChatList({
             e.preventDefault()
             submit()
           }}
-          placeholder="输入消息…"
+          placeholder="输入消息…（@AI 向 AI 助手提问）"
           maxLength={2000}
           className="min-w-0 flex-1 rounded-lg bg-[var(--surface-2)] px-3 py-2 text-sm outline-none placeholder:text-neutral-500 focus:ring-1 focus:ring-[var(--brand)]"
         />
@@ -229,7 +250,7 @@ function PeopleList({
       {sorted.map((p) => (
         <div key={p.id} className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-white/5">
           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/10 text-xs font-medium text-neutral-300">
-            {p.name.slice(0, 1).toUpperCase()}
+            {p.id === AI_AGENT_ID ? '🤖' : p.name.slice(0, 1).toUpperCase()}
           </div>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm text-neutral-200">
