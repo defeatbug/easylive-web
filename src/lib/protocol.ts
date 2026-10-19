@@ -42,6 +42,7 @@ export type MsgType =
   | 'whiteboard_op' // 服务端广播一条被接受的白板操作（带 by/seq）
   | 'ai_summary_state' // 服务端广播 AI 总结状态（开关 + 当前纪要）
   | 'ai_summary_update' // 服务端推送纪要内容更新
+  | 'ai_agent_state' // 服务端广播 AI 问答助手状态 {aiAgent:{active,state}}（thinking|speaking|idle）
   | 'pong'
   | 'error'
 
@@ -155,6 +156,20 @@ export interface AISummaryState {
 }
 
 /**
+ * AI 问答助手状态（与 Go protocol.AIAgentState 1:1）。
+ * 总结是"房间级后台任务"，问答助手是"虚拟参会者"（ai-agent 身份发布音频轨，
+ * 说话时参与 active_speakers 高亮）。
+ */
+export interface AIAgentState {
+  active: boolean
+  /** thinking（正在想）| speaking（正在语音回答）| idle（空闲） */
+  state: 'thinking' | 'speaking' | 'idle'
+}
+
+/** AI 问答助手在房间里的虚拟参与者 ID（与 Go protocol.AIAgentID 一致） */
+export const AI_AGENT_ID = 'ai-agent'
+
+/**
  * 活跃说话人。Level 是归一化音频电平（0—1），由服务端从 RFC 6464 头扩展解析并平滑。
  * 服务端只在**集合变化**时推送（与 LiveKit 的 ActiveSpeakersChanged 同语义）。
  */
@@ -262,6 +277,8 @@ export interface Message {
   recording?: RecordingState
   /** AI 总结载荷（ai_summary / ai_summary_state / ai_summary_update） */
   aiSummary?: AISummaryState
+  /** AI 问答助手状态载荷（ai_agent_state） */
+  aiAgent?: AIAgentState
   /** 白板操作载荷（whiteboard / whiteboard_op） */
   op?: WhiteboardOp
   /** 服务端实际生效的权限（joined 下发；无鉴权模式为全权限 devGrants） */

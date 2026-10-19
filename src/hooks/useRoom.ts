@@ -26,6 +26,7 @@ const EMPTY: RoomSnapshot = {
   virtualBackgroundBusy: false,
   recording: { active: false },
   aiSummary: { active: false },
+  aiAgent: { active: false, state: 'idle' },
   whiteboard: [],
   stats: null,
   error: null,

@@ -12,6 +12,7 @@ import { startVirtualBackground, type VirtualBackgroundHandle, type VirtualBackg
 import { fetchRecordings, type RecordingState, type RecordingsResponse } from './recordings'
 import type { WhiteboardOp } from './protocol'
 import type {
+  AIAgentState,
   AISummaryState,
   Candidate,
   ChatMessage,
@@ -107,6 +108,8 @@ export interface RoomSnapshot {
   /** 当前录制状态（服务端广播 + 入会快照；active=true 时全员显示红点） */
   recording: RecordingState
   aiSummary: AISummaryState
+  /** AI 问答助手状态（服务端 ai_agent_state 广播；thinking/speaking/idle） */
+  aiAgent: AIAgentState
   /** 房间白板内容（来自入会快照 + 服务端广播；存操作序列，可撤销、可完整还原） */
   whiteboard: WhiteboardOp[]
 }
@@ -290,6 +293,7 @@ export class RoomClient {
       virtualBackgroundBusy: false,
       recording: { active: false },
       aiSummary: { active: false },
+      aiAgent: { active: false, state: 'idle' },
       whiteboard: [],
     }
   }
@@ -349,6 +353,7 @@ export class RoomClient {
       // 入会快照带回录制状态：中途进来的人不必等下一次广播才知道"正在录制"
       recording: joined.room?.recording ?? { active: false },
       aiSummary: joined.room?.aiSummary ?? { active: false },
+      aiAgent: { active: false, state: 'idle' },
       whiteboard: joined.room?.whiteboard ?? [],
     })
     const self = joined.room?.participants.find((p) => p.id === joined.participantId) ?? null
@@ -1534,6 +1539,10 @@ export class RoomClient {
       case 'ai_summary_state':
       case 'ai_summary_update': {
         this.update({ aiSummary: msg.aiSummary ?? { active: false } })
+        break
+      }
+      case 'ai_agent_state': {
+        this.update({ aiAgent: msg.aiAgent ?? { active: false, state: 'idle' } })
         break
       }
       case 'chat_message': {

@@ -9,6 +9,8 @@ interface VideoTileProps {
   label: string
   /** 已设置头像时用它替代首字母（服务端下发，客户端无法自报） */
   avatarUrl?: string
+  /** emoji 头像（如 AI 助手的 🤖）：优先级高于首字母、低于 avatarUrl */
+  avatarEmoji?: string
   /** 本地画面需要镜像（自拍视角） */
   mirrored?: boolean
   /** 该参与者当前是否静音 */
@@ -48,6 +50,7 @@ export function VideoTile({
   stream,
   label,
   avatarUrl,
+  avatarEmoji,
   mirrored,
   muted,
   screen,
@@ -119,7 +122,7 @@ export function VideoTile({
           <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-full bg-white/10 text-xl font-medium text-neutral-300 sm:h-24 sm:w-24 sm:text-3xl">
             {avatarUrl
               ? <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
-              : label.slice(0, 1).toUpperCase()}
+              : (avatarEmoji ?? label.slice(0, 1).toUpperCase())}
           </div>
         </div>
       )}
