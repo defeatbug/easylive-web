@@ -23,6 +23,10 @@ export type MsgType =
   | 'record' // 录制开关：start | stop（需要 roomAdmin）
   | 'whiteboard' // 白板操作：{op:{kind,stroke}}（任何参会者都可画）
   | 'ai_summary' // AI 总结开关：{action: start|stop}（任何参会者）
+  // 客户端上报链路质量 {quality:{rttMs,lossRate,outKbps,inKbps}}：
+  // fire-and-forget —— 服务端不回响应、也不需要 id；未入会/参数非法/1s 内重复
+  // 会被静默丢弃，所以调用点必须容忍"发出去但没有任何反馈"。
+  | 'client_metrics'
   // 服务端 -> 客户端
   | 'joined'
   | 'flash_message' // 服务端广播的弹幕/互动 {flash}
@@ -216,6 +220,22 @@ export interface ChatMessage {
   ts: number
 }
 
+/**
+ * 客户端上报的一次链路质量采样（与服务端 protocol.ClientQuality 1:1）。
+ *
+ * 单位与数据库列**故意不一致**，这是这类指标最常见的错误来源，所以两边都写死：
+ *  - `lossRate` 是**百分比 0–100**（浏览器 getStats 按窗口差分算出来天然是百分比）；
+ *    `metric_samples.loss_rate` 存的是 0–1 的比例，`/100` 由服务端做**唯一一次**转换，
+ *    前端不要自己转，图表展示时再乘回 100。
+ *  - `outKbps` / `inKbps` 是**千比特/秒**（kbps），不是字节。
+ */
+export interface ClientQuality {
+  rttMs: number
+  lossRate: number
+  outKbps: number
+  inKbps: number
+}
+
 /** 与 Go 的 protocol.Message 结构一一对应（扁平结构，按 type 取用字段）。 */
 export interface Message {
   type: MsgType
@@ -262,6 +282,8 @@ export interface Message {
   recording?: RecordingState
   /** AI 总结载荷（ai_summary / ai_summary_state / ai_summary_update） */
   aiSummary?: AISummaryState
+  /** 客户端上报的链路质量（client_metrics），对齐服务端 `Quality json:"quality,omitempty"` */
+  quality?: ClientQuality
   /** 白板操作载荷（whiteboard / whiteboard_op） */
   op?: WhiteboardOp
   /** 服务端实际生效的权限（joined 下发；无鉴权模式为全权限 devGrants） */

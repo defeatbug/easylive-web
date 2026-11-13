@@ -2,8 +2,6 @@ import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { openDetachedWindow, toggleFullscreen as requestFullscreen, togglePictureInPicture } from '../lib/multiWindow'
 
-type Quality = 'excellent' | 'good' | 'fair' | 'poor' | 'unknown'
-
 interface VideoTileProps {
   stream: MediaStream | null
   label: string
@@ -15,8 +13,6 @@ interface VideoTileProps {
   muted?: boolean
   /** 屏幕共享瓦片：不镜像、按 contain 显示，避免文字被裁切 */
   screen?: boolean
-  /** 网络质量（右下角柱子），不传则不显示 */
-  quality?: Quality
   badge?: ReactNode
   /** 独立窗口去重用；不传则用 label */
   tileId?: string
@@ -41,8 +37,11 @@ interface VideoTileProps {
 /**
  * 单个视频瓦片。
  *
- * 视觉上向 LiveKit Meet 靠：无边框、深色底、左下角小名字条、右下角质量柱、右上角全屏。
+ * 视觉上向 LiveKit Meet 靠：无边框、深色底、左下角小名字条、右上角全屏。
  * 关键实现点：<video> 的 srcObject 只能用 ref 赋值（React 不支持该属性）。
+ *
+ * 这里**不再有逐轨道的网络质量柱**：快照里只有全局 LinkStats（顶栏/指标面板用），
+ * 没有按 track 统计的数据源；保留一个永远拿不到值的 quality prop 只会误导调用方。
  */
 export function VideoTile({
   stream,
@@ -51,7 +50,6 @@ export function VideoTile({
   mirrored,
   muted,
   screen,
-  quality,
   badge,
   tileId,
   onToggleSidebar,
@@ -89,10 +87,20 @@ export function VideoTile({
   const tileKey = tileId ?? label
   /** 多窗口操作的瞬时提示（例如弹窗被拦截）；1.6s 后自动消失，不打断会议 */
   const [hint, setHint] = useState<string | null>(null)
+  const hintTimer = useRef<number | null>(null)
   const showHint = (msg: string) => {
     setHint(msg)
-    window.setTimeout(() => setHint(null), 1600)
+    if (hintTimer.current) window.clearTimeout(hintTimer.current)
+    hintTimer.current = window.setTimeout(() => setHint(null), 1600)
   }
+  // 卸载时清掉定时器：瓦片随时可能被移除（对方离开、断线、布局切换），
+  // 定时器不清就会在卸载后继续 setState。
+  useEffect(
+    () => () => {
+      if (hintTimer.current) window.clearTimeout(hintTimer.current)
+    },
+    [],
+  )
 
   return (
     <div
@@ -146,9 +154,6 @@ export function VideoTile({
         </div>
       )}
 
-      {/* 右下角网络质量柱 */}
-      {quality && <QualityBars quality={quality} />}
-
       {/* 右上角多窗口控件（悬停出现）：三个能力都来自浏览器原生 API——
           画中画浮动小窗、独立窗口（把这一路画面弹到单独窗口，可拖到副屏）、全屏。 */}
       {hasVideo && stream && (
@@ -192,33 +197,6 @@ export function VideoTile({
           <SidebarIcon open={!!sidebarOpen} />
         </button>
       )}
-    </div>
-  )
-}
-
-const QUALITY_COLOR: Record<Quality, string> = {
-  excellent: 'bg-emerald-400',
-  good: 'bg-emerald-400',
-  fair: 'bg-amber-400',
-  poor: 'bg-red-500',
-  unknown: 'bg-neutral-500',
-}
-
-function QualityBars({ quality }: { quality: Quality }) {
-  // 三根柱子，按质量决定点亮根数（LiveKit Meet 右下角就是这个样式）
-  const level = quality === 'excellent' ? 3 : quality === 'good' ? 3 : quality === 'fair' ? 2 : quality === 'poor' ? 1 : 0
-  const color = QUALITY_COLOR[quality]
-  const title = { excellent: '网络优秀', good: '网络良好', fair: '网络一般', poor: '网络较差', unknown: '网络未知' }[quality]
-
-  return (
-    <div className="absolute bottom-2 right-2 flex items-end gap-0.5 rounded bg-black/50 px-1.5 py-1" title={title}>
-      {[1, 2, 3].map((i) => (
-        <span
-          key={i}
-          className={`w-1 rounded-sm ${i <= level ? color : 'bg-white/25'}`}
-          style={{ height: `${i * 3 + 3}px` }}
-        />
-      ))}
     </div>
   )
 }

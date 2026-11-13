@@ -140,7 +140,9 @@ function ChatList({
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [chat.length])
+    // 依赖整个数组而不是 chat.length：聊天有 500 条上限，到顶后长度不再变化，
+    // 只依赖 length 会导致新消息不再自动滚到底部。chat 每次更新都是新数组。
+  }, [chat])
 
   const submit = () => {
     const t = text.trim()

@@ -15,6 +15,7 @@ import type {
   AISummaryState,
   Candidate,
   ChatMessage,
+  ClientQuality,
   ConnectionState,
   MediaTarget,
   Message,
@@ -136,6 +137,39 @@ const RECONNECT_MAX_MS = 8000
 const RECONNECT_MAX_ATTEMPTS = 8
 
 /**
+ * 聊天记录上限。
+ *
+ * 只 append 不裁剪的话，长时间会议的内存无界增长（消息体还不小：每条带发送者与时间）。
+ * 500 条足够回看最近内容，与 reactions 的固定上限是同一种"快照必须有界"的策略。
+ */
+const CHAT_HISTORY_LIMIT = 500
+
+/**
+ * 链路质量上报节流：每 5 次**有效**采样上报一条 client_metrics。
+ *
+ * 采样定时器是 2s 一跳，5 次即约 10s。为什么不每次（2s）都发：
+ *  1. 服务端按 5s 桶聚合、30s 过期，并做了"1s 内重复静默丢弃"的去重，
+ *     2s 一条纯属刷控制面信令（信令面是可靠有序的控制通道，不该被指标淹没）；
+ *  2. 10s 的分辨率足够在报表页画出趋势，又不会让 metric_samples 行数暴涨。
+ * 只统计**有效**样本，是因为连接刚建立/重建时 getStats 可能还没有数据，
+ * 那些轮次不上报，也不该占用节流额度（否则重连后要等更久才恢复上报）。
+ */
+const QUALITY_REPORT_EVERY = 5
+
+/**
+ * getDisplayMedia 的"用户取消/未授权"错误判定。
+ *
+ * 这类失败重试没有意义——浏览器会**再次弹出**选源框，用户会以为按钮坏了；
+ * 所以必须直接上抛给调用方给出提示，而不是像"音频不被支持"那样降级重试。
+ */
+function isDisplayCaptureCancelled(err: unknown): boolean {
+  // 用 name 字段而不是 `instanceof DOMException/Error`：各浏览器里 DOMException 的
+  // 原型链并不一致（旧实现断言不到），取 name 是跨浏览器最稳的判定。
+  const name = (err as { name?: unknown } | null)?.name
+  return name === 'NotAllowedError' || name === 'AbortError'
+}
+
+/**
  * 断线恢复令牌的持久化键。
  *
  * 为什么必须持久化：**刷新页面**时浏览器会直接杀掉进程，WebSocket 断开时来不及发 `leave`，
@@ -214,6 +248,14 @@ export class RoomClient {
   /** 订阅必须串行：服务端在 sub 连接上是 offerer，并发订阅会撞 LocalDescription 状态 */
   private subQueue: Promise<void> = Promise.resolve()
   /**
+   * 发布重协商必须串行：同一时刻只能有一个 offer 在途。
+   *
+   * 发布本地媒体、开/关屏幕共享、ICE restart 后的恢复、全量重连都会触发重协商；
+   * 并发时第二个 createOffer/setLocalDescription 会撞 InvalidStateError
+   * （表现为屏幕共享点了没反应、或重连后媒体卡死）。与 subQueue 同风格。
+   */
+  private pubQueue: Promise<void> = Promise.resolve()
+  /**
    * 待绑定的服务端 trackId 队列（FIFO）。
    *
    * 为什么需要它：RTCPeerConnection.ontrack 给出的 MediaStream.id 是**发布者浏览器里的 msid**，
@@ -258,6 +300,8 @@ export class RoomClient {
   private statsTimer: number | null = null
   private lastStatsBytes: { out: number; in: number; at: number } = { out: 0, in: 0, at: 0 }
   private lastStatsPackets: { lost: number; received: number } = { lost: 0, received: 0 }
+  /** client_metrics 节流计数：只在"已连接 + 有有效样本"的轮次累加（见 reportQuality） */
+  private qualityReportTick = 0
   private closed = false
 
   constructor(opts: RoomClientOptions) {
@@ -603,6 +647,9 @@ export class RoomClient {
     this.pendingTrackIds = []
     this.pendingByMid.clear()
     this.subQueue = Promise.resolve()
+    // 老发布连接已经 close：在途的那次重协商注定失败，别让新的重协商排在它后面
+    // 白等一个 publish_answer 超时（两条连接对象不同，并发不会互相污染状态）。
+    this.pubQueue = Promise.resolve()
     this.myScreenTrackId = null
 
     this.createPeerConnections()
@@ -882,6 +929,11 @@ export class RoomClient {
         } as MediaTrackConstraints,
       })
     } catch (err) {
+      // 用户取消选源 / 未授予屏幕录制权限：**不能**再调一次 getDisplayMedia。
+      // 旧实现无条件重试，结果取消后立刻又弹一次选源框（像按钮坏了），
+      // 且第二次失败从调用点的 void 调用里漏成 unhandled rejection。
+      // 直接上抛（换成一句人话，浏览器原始文案是英文的），由调用方显示出来。
+      if (isDisplayCaptureCancelled(err)) throw new Error('已取消屏幕共享，或浏览器未授予屏幕录制权限')
       stream = await navigator.mediaDevices.getDisplayMedia({
         video: { frameRate: { ideal: 15, max: 30 } },
         audio: false,
@@ -900,8 +952,13 @@ export class RoomClient {
     } catch {
       /* 个别浏览器不支持 contentHint，忽略即可 */
     }
-    // 用户点击浏览器"停止共享"时也要通知服务端重协商
-    track.onended = () => void this.stopScreenShare()
+    // 用户点击浏览器"停止共享"时也要通知服务端重协商。
+    // 这条路径没有页面调用点可以接住 rejection，所以在这里自己收尾（至少不能漏成 unhandled）。
+    track.onended = () => {
+      void this.stopScreenShare().catch((e) => {
+        console.warn('[RoomClient] 结束屏幕共享失败（浏览器侧已停止采集）', e)
+      })
+    }
     this.pubPC.addTrack(track, stream)
     // 系统声音也发布（source 由 renegotiatePublish('screen') 统一标记为 screen，服务端无需改动）
     for (const a of stream.getAudioTracks()) this.pubPC.addTrack(a, stream)
@@ -961,8 +1018,20 @@ export class RoomClient {
     await this.renegotiatePublish('camera')
   }
 
-  /** 在 pub 连接上重协商（客户端始终是 offerer，因此不会与服务端的 sub offer 冲突） */
-  private async renegotiatePublish(source: string): Promise<void> {
+  /**
+   * 在 pub 连接上重协商（客户端始终是 offerer，因此不会与服务端的 sub offer 冲突）。
+   *
+   * 入队而不是直接执行：保证"同时只有一个 offer 在途"（见 pubQueue 的说明）。
+   * 队列自身吞掉错误继续前进，但本次调用的错误仍然抛给调用方——
+   * 否则屏幕共享/切设备的失败会被静默掉。
+   */
+  private renegotiatePublish(source: string): Promise<void> {
+    const run = this.pubQueue.then(() => this.doRenegotiatePublish(source))
+    this.pubQueue = run.catch(() => {})
+    return run
+  }
+
+  private async doRenegotiatePublish(source: string): Promise<void> {
     const pc = this.pubPC
     if (!pc) return
     const offer = await pc.createOffer()
@@ -975,10 +1044,26 @@ export class RoomClient {
 
   // ---------- 订阅远端轨道 ----------
 
-  /** 串行化订阅：服务端在 sub 连接上是 offerer，必须一次协商完成后再进行下一次 */
-  private enqueueSubscribe(trackId: string) {
+  /**
+   * 串行化订阅：服务端在 sub 连接上是 offerer，必须一次协商完成后再进行下一次。
+   *
+   * 失败处理：一次瞬时失败（例如恰好撞上信令重连）值得重试一次；仍然失败则给出
+   * 可见提示——订阅失败的表现是"这个人的画面一直黑"，只在控制台里没人看得到。
+   * 用 notice（非致命、可关闭）而不是 error：单条轨道失败不影响连接与其它轨道。
+   */
+  private enqueueSubscribe(trackId: string, isRetry = false) {
+    if (this.closed) return
     this.subQueue = this.subQueue.then(() => this.subscribeTrack(trackId)).catch((e) => {
       console.warn('[RoomClient] 订阅失败', trackId, e)
+      const reason = e instanceof Error ? e.message : String(e)
+      // 重试前确认这条轨道还在：对方可能已经离开/取消发布，没必要再订阅一条死轨。
+      const stillPublished = this.snapshot.tracks.some((t) => t.id === trackId)
+      if (!isRetry && !this.closed && stillPublished) {
+        this.update({ notice: `订阅远端画面失败（${reason}），正在重试…` })
+        window.setTimeout(() => this.enqueueSubscribe(trackId, true), 1000)
+        return
+      }
+      this.update({ notice: `订阅远端画面失败：${reason}（可尝试刷新页面或重新连接）` })
     })
   }
 
@@ -988,18 +1073,37 @@ export class RoomClient {
     if (this.snapshot.remoteStreams[trackId]) return
 
     const offer = await this.request({ type: 'subscribe', trackId }, ['subscribe_offer'], 15000)
-    if (!offer.sdp) throw new Error('subscribe_offer 缺少 sdp')
+    // 空 SDP = 服务端表示"这条轨道已经订阅过"（subscribe 幂等去重），是正常 ack：
+    // 不需要 setRemoteDescription、不需要回 answer，更不能当成错误报警。
+    if (!offer.sdp) return
 
     // 必须在 setRemoteDescription **之前**登记：ontrack 是随应用远端描述一起触发的。
     // 服务端每次只在末尾追加一个 m-line，所以最后一个 a=mid: 就是这次新增的那条。
     const mid = lastMidFromSDP(offer.sdp)
-    if (mid) this.pendingByMid.set(mid, trackId)
-    else this.pendingTrackIds.push(trackId) // 解析不出 mid 时退回队列
-    await pc.setRemoteDescription({ type: 'offer', sdp: offer.sdp })
-    await this.flushCandidates('sub')
-    const answer = await pc.createAnswer()
-    await pc.setLocalDescription(answer)
-    this.send({ type: 'answer', target: 'sub', id: offer.id, sdp: pc.localDescription?.sdp ?? '' })
+    if (mid) {
+      // 先 delete 再 set：重试走的是同一个 trackId，若上一次留下了同 mid 的旧条目，
+      // 这里要先覆盖掉，避免 map 里堆叠历史映射。
+      this.pendingByMid.delete(mid)
+      this.pendingByMid.set(mid, trackId)
+    } else this.pendingTrackIds.push(trackId) // 解析不出 mid 时退回队列
+    try {
+      await pc.setRemoteDescription({ type: 'offer', sdp: offer.sdp })
+      await this.flushCandidates('sub')
+      const answer = await pc.createAnswer()
+      await pc.setLocalDescription(answer)
+      this.send({ type: 'answer', target: 'sub', id: offer.id, sdp: pc.localDescription?.sdp ?? '' })
+    } catch (e) {
+      // 协商失败（SDP 非法 / 连接正被重建等）：只回收**本次**登记的条目。
+      // 不清整张表——其它在途订阅的 mid → trackId 映射还要用。
+      // 留着会怎样：ontrack 按 mid 查表，之后另一条轨道复用同一个 mid 时会被错绑到
+      // 这条早已失败的轨道上（表现为瓦片黑屏/绑到错误的流）。
+      if (mid) this.pendingByMid.delete(mid)
+      else {
+        const i = this.pendingTrackIds.lastIndexOf(trackId)
+        if (i >= 0) this.pendingTrackIds.splice(i, 1)
+      }
+      throw e
+    }
   }
 
   // ---------- 设备切换（不重协商，用 replaceTrack 热替换）----------
@@ -1114,6 +1218,12 @@ export class RoomClient {
     this.update({ virtualBackgroundBusy: true })
     try {
       const handle = await startVirtualBackground(camera)
+      // 等模型/首帧期间用户可能已经离会：leave() 那时 vb 还是 null，收尾收不到这个句柄。
+      // 必须在这里自行释放，否则这条 rAF 处理循环会在离会后一直跑下去。
+      if (this.closed) {
+        handle.stop()
+        return
+      }
       this.vb?.stop()
       this.vb = handle
       this.vbCameraTrack = camera
@@ -1369,6 +1479,16 @@ export class RoomClient {
     } catch {
       /* 忽略 */
     }
+    // 虚拟背景的 rAF/画布处理循环不属于任何 MediaStream，下面的 track.stop() 覆盖不到它：
+    // 不停的话离会后仍在 15fps 跑人像分割（持续吃 CPU/GPU）。
+    // 另外 VB 开启时 localStream 里放的是处理后的画布轨，原始摄像头轨只被 vbCameraTrack
+    // 引用——也必须在这里 stop，否则摄像头指示灯不灭。
+    this.vb?.stop()
+    this.vb = null
+    const vbCamera = this.vbCameraTrack
+    this.vbCameraTrack = null
+    vbCamera?.stop()
+
     this.localStream?.getTracks().forEach((t) => t.stop())
     this.screenStream?.getTracks().forEach((t) => t.stop())
     void this.pubPC?.close()
@@ -1378,14 +1498,32 @@ export class RoomClient {
     this.ws?.close()
     this.ws = null
     this.rejectPending('已离开房间')
-    this.update({ connection: 'closed', reconnectAttempt: 0 })
+    // 快照如实反映"特效已停"：leave() 可能被调用两次（用户点离开 + 组件卸载），
+    // 上面每一步都是幂等的（stop 可重复调用、句柄已置空）。
+    this.update({ connection: 'closed', reconnectAttempt: 0, virtualBackground: 'off', virtualBackgroundBusy: false })
   }
 
   // ---------- 协议收发 ----------
 
-  private send(msg: Message) {
-    if (this.ws?.readyState !== WebSocket.OPEN) return
-    this.ws.send(JSON.stringify(msg))
+  /**
+   * 发送一帧信令，返回是否**真的写出去了**。
+   *
+   * 为什么返回 boolean：socket 未就绪时旧实现静默 return，而 `request()` 已经把
+   * pending 注册好了，调用方只能干等满 timeoutMs（15-20s）才收到失败——界面上表现为
+   * "点了没反应"，串行的 subQueue/pubQueue 还被一起堵住。需要区分成败的调用方
+   * （目前只有 request）用返回值立即失败；其余调用点忽略返回值，"失败不抛"语义不变。
+   */
+  private send(msg: Message): boolean {
+    if (this.ws?.readyState !== WebSocket.OPEN) return false
+    try {
+      this.ws.send(JSON.stringify(msg))
+      return true
+    } catch (e) {
+      // send 在 CLOSING 竞态/发送缓冲异常时也可能抛；信令面是尽力而为的，
+      // 这里统一转成 false，让 request() 走"快速失败"而不是把异常冒给调用点。
+      console.warn('[RoomClient] 信令发送失败', e)
+      return false
+    }
   }
 
   /** 发送请求并等待指定类型的响应（用 id 匹配，超时抛错） */
@@ -1397,7 +1535,13 @@ export class RoomClient {
         reject(new Error(`等待 ${expect.join('/')} 超时`))
       }, timeoutMs)
       this.pending.set(id, { types: expect, resolve, reject, timer })
-      this.send({ ...msg, id })
+      // 写不出去就立刻收尾（清 timer + pending），不等满超时：
+      // 断线/重连期间发出的 request 注定收不到响应，等满只会拖慢上层重试。
+      if (!this.send({ ...msg, id })) {
+        window.clearTimeout(timer)
+        this.pending.delete(id)
+        reject(new Error('信令连接不可用，请稍后重试'))
+      }
     })
   }
 
@@ -1473,6 +1617,18 @@ export class RoomClient {
         })
         return
       }
+      case 'participant_state': {
+        // 断线不重建参与者：服务端在恢复宽限期内把该 peer 标成 reconnecting，
+        // 恢复后发 active。不处理这个 case 的话，别人看到的"重连中"角标永远停在旧值。
+        const id = msg.participantId
+        if (!id || !msg.state) return
+        // 找不到对应 peer 就忽略：本端可能还没收到 participant_joined（竞态），
+        // 不能凭一条状态消息凭空造出一个参与者。
+        this.update({
+          participants: this.snapshot.participants.map((p) => (p.id === id ? { ...p, state: msg.state } : p)),
+        })
+        return
+      }
       case 'track_published': {
         if (!msg.track) return
         if (this.snapshot.tracks.some((t) => t.id === msg.track!.id)) return
@@ -1538,7 +1694,8 @@ export class RoomClient {
       }
       case 'chat_message': {
         if (!msg.message) return
-        this.update({ chat: [...this.snapshot.chat, msg.message] })
+        // 只保留最近 500 条：快照数组必须有界，否则长会议内存只增不减
+        this.update({ chat: [...this.snapshot.chat, msg.message].slice(-CHAT_HISTORY_LIMIT) })
         return
       }
       case 'error': {
@@ -1561,6 +1718,17 @@ export class RoomClient {
   }
 
   private async collectStats() {
+    // 离会 / 连接已彻底关闭时不再采：statsTimer 只在 leave() 里被清掉，而"自动重连
+    // 放弃"只把 connection 置成 closed（定时器保留，以便用户点重新连接后继续用），
+    // 此时再对已关闭的连接 getStats 只会白白抛错。
+    if (this.closed || this.snapshot.connection === 'closed') return
+
+    // 在第一个 await 之前快照两条连接：await 期间 fullReconnect 会把 this.pubPC/subPC
+    // 置 null 并换成新对象，逐个读字段可能拿到"一条旧一条新"的不一致组合。
+    const pub = this.pubPC
+    const sub = this.subPC
+    if (!pub && !sub) return
+
     let rtt = 0
     let nominatedFound = false
     let jitter = 0
@@ -1587,7 +1755,10 @@ export class RoomClient {
         }
         if (r.type === 'inbound-rtp') {
           if (typeof s.jitter === 'number') jitter = Math.max(jitter, (s.jitter as number) * 1000)
-          if (typeof s.packetsLost === 'number') lost = Math.max(lost, s.packetsLost as number)
+          // 丢包数必须与下面的收包数**同口径求和**（音频/视频、pub/sub 可能有多路 inbound）。
+          // 旧实现取 Math.max：丢包集中在一条流上时，分子只取最大值、分母却把其它流的
+          // 收包全算进来，多路时丢包率会系统性偏低（评测数据直接失真）。
+          if (typeof s.packetsLost === 'number') lost += s.packetsLost as number
           if (typeof s.bytesReceived === 'number') inBytes += s.bytesReceived as number
           if (typeof s.packetsReceived === 'number') inPackets += s.packetsReceived as number
         }
@@ -1595,10 +1766,22 @@ export class RoomClient {
         if (r.type === 'local-candidate' && typeof s.candidateType === 'string') candidateType = s.candidateType as string
       })
     }
-    await read(this.pubPC)
-    await read(this.subPC)
+    try {
+      await read(pub)
+      await read(sub)
+    } catch (e) {
+      // getStats 在连接关闭/重建的瞬间会 reject（清理时内存里的 pc 正在销毁）。
+      // 这是正常的生命周期竞态：静默跳过本轮，2s 后再采；**不要**写 snapshot.error，
+      // 否则一次正常重连会被渲染成用户可见的错误条。
+      //
+      // 同时**不要**在这里重置 lastStatsBytes / lastStatsPackets：失败轮没有有效样本，
+      // 重置会把下一轮的有效窗口算成 0 或被截断，恢复后第一帧的码率/丢包率会跳变。
+      if (import.meta.env.DEV) console.debug('[RoomClient] 采集 stats 失败（连接重建中），跳过本轮', e)
+      return
+    }
 
-    // 丢包率 = 本窗口丢失 / (本窗口丢失 + 本窗口收到)
+    // 丢包率 = 本窗口丢失 / (本窗口丢失 + 本窗口收到)。
+    // lost 与 inPackets 都是跨所有 inbound-rtp 的累计和，差分后仍是同一口径。
     const dLost = Math.max(0, lost - this.lastStatsPackets.lost)
     const dRecv = Math.max(0, inPackets - this.lastStatsPackets.received)
     const lossRate = dLost + dRecv > 0 ? (dLost / (dLost + dRecv)) * 100 : 0
@@ -1615,16 +1798,52 @@ export class RoomClient {
     const inKbps = ((inBytes - this.lastStatsBytes.in) * 8) / 1000 / dtSec
     this.lastStatsBytes = { out: outBytes, in: inBytes, at: now }
 
+    // 先把本轮样本算成"展示口径"（取整）再复用：界面上的 stats 与上报给服务端的
+    // client_metrics 必须是**同一份数字**，否则报表曲线和用户看到的统计对不上。
+    const rttMs = Math.round(rtt)
+    const lossRatePct = Math.round(lossRate * 10) / 10
+    const outKbpsRounded = Math.max(0, Math.round(outKbps))
+    const inKbpsRounded = Math.max(0, Math.round(inKbps))
+
     this.update({
       stats: {
-        rttMs: Math.round(rtt),
+        rttMs,
         jitterMs: Math.round(jitter),
         packetsLost: lost,
-        lossRate: Math.round(lossRate * 10) / 10,
-        outKbps: Math.max(0, Math.round(outKbps)),
-        inKbps: Math.max(0, Math.round(inKbps)),
+        lossRate: lossRatePct,
+        outKbps: outKbpsRounded,
+        inKbps: inKbpsRounded,
         candidateType,
       },
     })
+
+    // 同一份样本按 10s 节流上报给服务端（fire-and-forget），让 metric_samples 的
+    // rtt_ms/loss_rate/out_kbps/in_kbps 变成真实数据而不是恒 0。
+    this.reportQuality({ rttMs, lossRate: lossRatePct, outKbps: outKbpsRounded, inKbps: inKbpsRounded })
+  }
+
+  /**
+   * 把一次有效采样节流上报为 `client_metrics`（服务端据此写 metric_samples）。
+   *
+   * 这里刻意不做错误处理/重试：服务端对这条消息**不回响应**（无需 id），
+   * 未入会、参数非法、1s 内重复都会被静默丢弃，丢一条样本对历史曲线没有影响。
+   */
+  private reportQuality(quality: ClientQuality) {
+    // 只有真正 connected 才上报：
+    //  1. connecting/reconnecting 期间的 RTT/码率不代表会中体验，混进历史曲线会污染趋势；
+    //  2. 上面的 await 期间可能刚好断线/leave()，所以这里必须再判一次，不能只靠入口守卫。
+    if (this.closed || this.snapshot.connection !== 'connected') return
+
+    // 全 0 说明 getStats 还没产出有效样本（连接刚建立/重建）。此时上报会把 0 写进
+    // 历史曲线，看起来像"链路完美"，比缺数据更有误导性。
+    if (quality.rttMs <= 0 && quality.outKbps <= 0 && quality.inKbps <= 0) return
+
+    // 有效样本才占用节流额度：详见 QUALITY_REPORT_EVERY 的注释。
+    if (++this.qualityReportTick < QUALITY_REPORT_EVERY) return
+    this.qualityReportTick = 0
+
+    // 用 send() 而不是 request()：服务端不回响应，request() 会挂一个 15–20s 的
+    // 超时兜底并把它当错误抛给调用方，纯属白等。send() 返回 false 也静默忽略。
+    this.send({ type: 'client_metrics', quality })
   }
 }

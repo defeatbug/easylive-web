@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ControlBar } from '../components/ControlBar'
 import { IconCheck, IconCopy } from '../components/Icons'
 import type { AccountUser } from '../lib/auth'
@@ -88,7 +88,12 @@ export function MeetingRoom({
   const [view, setView] = useState<ViewMode>('grid')
   const [activeKey, setActiveKey] = useState<string | null>(null)
   const [shareOpen, setShareOpen] = useState(false)
-  const [accountError, setAccountError] = useState<string | null>(null)
+  /**
+   * 页面级可见错误：用户主动操作（屏幕共享 / 切设备 / 录制）失败时的原因。
+   * 这些入口都是 `void promise` 调用，不 catch 就只剩控制台里的 unhandled rejection，
+   * 界面看起来"点了没反应"——这里统一接到已有的红条上，可手动关闭。
+   */
+  const [actionError, setActionError] = useState<string | null>(null)
   /** 复制会议号后的短暂反馈（1.5s 后自动消失，不弹窗打断） */
   const [copied, setCopied] = useState(false)
   /** 录制列表面板（仅主持人可打开） */
@@ -101,6 +106,20 @@ export function MeetingRoom({
   const [micId, setMicId] = useState<string | undefined>(initialDevices.micId)
   const [camId, setCamId] = useState<string | undefined>(initialDevices.camId)
 
+  /**
+   * 执行一个会失败的用户操作，并把失败原因显示到红条上。
+   *
+   * 为什么需要：这些调用点原来都是 `void client.xxx()`，rejection 只进控制台，
+   * 表现为"点共享屏幕没反应""切设备没生效"且没有任何提示。
+   * 统一在这里接住，避免每个按钮各写一遍 catch（也避免漏掉键盘快捷键那条路径）。
+   */
+  const runAction = useCallback((label: string, task: Promise<unknown> | undefined) => {
+    if (!task) return
+    void task.catch((e: unknown) => {
+      setActionError(`${label}：${e instanceof Error ? e.message : String(e)}`)
+    })
+  }, [])
+
   // 快捷键：m 静音 / v 摄像头 / s 屏幕共享
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -109,11 +128,16 @@ export function MeetingRoom({
       if (!client) return
       if (e.key === 'm') client.setMicEnabled(!snapshot.micEnabled)
       if (e.key === 'v') client.setCamEnabled(!snapshot.camEnabled)
-      if (e.key === 's') void (snapshot.screenStream ? client.stopScreenShare() : client.startScreenShare())
+      if (e.key === 's') {
+        runAction(
+          snapshot.screenStream ? '停止屏幕共享失败' : '开始屏幕共享失败',
+          snapshot.screenStream ? client.stopScreenShare() : client.startScreenShare(),
+        )
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [client, snapshot.micEnabled, snapshot.camEnabled, snapshot.screenStream])
+  }, [client, snapshot.micEnabled, snapshot.camEnabled, snapshot.screenStream, runAction])
 
   const tiles = useMemo<Tile[]>(() => {
     const out: Tile[] = []
@@ -304,10 +328,10 @@ export function MeetingRoom({
         </div>
       )}
 
-      {(error || accountError) && (
+      {(error || actionError) && (
         <div role="alert" className="relative z-20 mx-4 mb-2 flex shrink-0 items-center gap-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
-          <span className="min-w-0 flex-1">{accountError ?? error}</span>
-          {accountError && <button type="button" onClick={() => setAccountError(null)} className="shrink-0 rounded px-2 py-1 hover:bg-red-500/20">关闭</button>}
+          <span className="min-w-0 flex-1">{actionError ?? error}</span>
+          {actionError && <button type="button" onClick={() => setActionError(null)} className="shrink-0 rounded px-2 py-1 hover:bg-red-500/20">关闭</button>}
           {error && snapshot.connection === 'closed' && (
             <button
               onClick={retryConnect}
@@ -422,7 +446,10 @@ export function MeetingRoom({
             onToggleMic={() => client?.setMicEnabled(!snapshot.micEnabled)}
             onToggleCam={() => client?.setCamEnabled(!snapshot.camEnabled)}
             onToggleScreen={() =>
-              void (snapshot.screenStream ? client?.stopScreenShare() : client?.startScreenShare())
+              runAction(
+                snapshot.screenStream ? '停止屏幕共享失败' : '开始屏幕共享失败',
+                snapshot.screenStream ? client?.stopScreenShare() : client?.startScreenShare(),
+              )
             }
             onToggleView={() => setView(view === 'grid' ? 'sidebar' : 'grid')}
             onShare={() => setShareOpen(true)}
@@ -436,11 +463,11 @@ export function MeetingRoom({
             }}
             onSelectMic={(id) => {
               setMicId(id)
-              void client?.switchMicrophone(id)
+              runAction('切换麦克风失败', client?.switchMicrophone(id))
             }}
             onSelectCam={(id) => {
               setCamId(id)
-              void client?.switchCamera(id)
+              runAction('切换摄像头失败', client?.switchCamera(id))
             }}
             handRaised={snapshot.hands.includes(snapshot.self?.id ?? '')}
             dataChannelReady={snapshot.dataChannelReady}
@@ -474,7 +501,10 @@ export function MeetingRoom({
             // 而不是主持人身份——主持人不在线时，成员也该能留个记录。
             canRecord={snapshot.grants?.canPublishData ?? false}
             onToggleRecording={() =>
-              void client?.setRecording(snapshot.recording.active ? 'stop' : 'start')
+              runAction(
+                snapshot.recording.active ? '停止录制失败' : '开始录制失败',
+                client?.setRecording(snapshot.recording.active ? 'stop' : 'start'),
+              )
             }
             onOpenRecordings={() => setRecordingsOpen(true)}
             virtualBackground={snapshot.virtualBackground}

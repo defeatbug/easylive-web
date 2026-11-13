@@ -25,7 +25,7 @@ Vite 已把 `/ws`、`/graphql`、`/healthz` 代理到 `http://localhost:8080`，
 | 文件 | 作用 |
 |---|---|
 | `src/lib/protocol.ts` | 信令协议类型定义，**必须与 `easylive-api/protocol/protocol.go` 1:1 对齐** |
-| `src/lib/RoomClient.ts` | WebRTC + 信令的唯一持有者（普通 TS 类）：两条 PeerConnection、请求响应匹配、ICE 候选缓存、订阅串行化、指标采集 |
+| `src/lib/RoomClient.ts` | WebRTC + 信令的唯一持有者（普通 TS 类）：两条 PeerConnection、请求响应匹配、ICE 候选缓存、订阅与发布重协商串行化、指标采集 |
 | `src/hooks/useRoom.ts` | 用 `useSyncExternalStore` 把 `RoomClient` 接到 React，UI 只消费不可变快照 |
 | `src/pages/JoinPage.tsx` | 入会页（房间号 + 昵称） |
 | `src/pages/MeetingRoom.tsx` | 会议主界面：顶栏 / 视频宫格 / 右侧面板 / 底部控制栏 |
@@ -39,7 +39,8 @@ Vite 已把 `/ws`、`/graphql`、`/healthz` 代理到 `http://localhost:8080`，
 2. **ICE 候选要缓存。** 浏览器在 `setRemoteDescription` 之前调用 `addIceCandidate` 会抛错；
    服务端候选往往先于 SDP 到达，因此按 `pub`/`sub` 分别缓存，设置远端描述后再 flush。
 3. **订阅必须串行。** 订阅者连接上服务端是 offerer，并发订阅会在 `have-local-offer` 状态下再创建
-   offer 而失败。`RoomClient` 用一条 Promise 队列把订阅串起来。
+   offer 而失败。`RoomClient` 用一条 Promise 队列把订阅串起来。发布重协商同理（发布媒体、开/关屏幕共享、
+   ICE restart 都会触发 offer），用另一条队列保证同一时刻只有一个 offer 在途，否则会撞 `InvalidStateError`。
 
 ## 常用脚本
 
@@ -77,7 +78,17 @@ node scripts/ui-probe.mjs        # 默认打 https://localhost:5173 + http://loc
 
 ## 已知未完成项（下一步）
 
-- 断线重连（当前 WebSocket 断开只更新状态，不自动重连；对应后端 M4）
-- 业务后端 GraphQL 接口（创建房间 / 房间列表），前端目前用 URL 参数传房间号
+以下三件事已经做完了，不再列在"未完成"里：
+
+- 断线重连：`RoomClient` 用 `resumeToken` 在服务端宽限期内恢复同一身份，超时后走全量重连并复用本地流重新发布；
+- 会议创建/查询：`/rooms`、`/rooms/mine` 已接入（`src/lib/rooms.ts`），不再只能靠 URL 参数传房间号；
+- 鉴权与账号：JWT 令牌、登录/注册、头像上传、管理员用户管理页、指标报表页都已接通。
+
+真正还没做的：
+
+- **没有前端单测框架**：验证手段是 `tsc --noEmit` + `vite build` + `scripts/*-probe.mjs` 的真实浏览器探针；
+  `RoomClient` 这类纯逻辑缺少可重复的单元回归，回归成本偏高。
 - 屏幕共享在 Safari 上受系统限制，建议用 Chrome 演示
 - 多人网格在超过 9 路时的分页/虚拟滚动（实测 20 路浏览器解码会先成为瓶颈）
+- 逐轨道的网络质量角标（每个瓦片右下角的信号柱）：目前只有全局指标（顶栏 / 指标面板），
+  没有按 track 统计的数据源；`VideoTile` 因此不再暴露一个永远拿不到值的 `quality` prop。
