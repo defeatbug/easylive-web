@@ -1,5 +1,8 @@
 # 依赖与构建产物
 node_modules/
+# 同时忽略同名的符号链接/文件：`node_modules/` 只匹配目录，
+# 若有人误把绝对路径的 node_modules 符号链接提交进来，上面那行拦不住。
+node_modules
 dist/
 dist-ssr/
 .vite/
