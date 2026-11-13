@@ -49,10 +49,14 @@ PROBE_URL=https://localhost:5174 PROBE_API=http://localhost:8080 node scripts/do
 | `polish-probe.mjs` | 动效/多窗口 | 8 |
 | `metrics-page-probe.mjs` | 报表页（需要数据库里有采样） | 8 |
 
+> 上表是**核心**探针；`scripts/` 下共 18 个脚本（17 探针 + 1 截图工具），
+> 其余覆盖 AI 消息、虚拟背景、协商编码、令牌错误提示、白板笔画不丢、消息洪水防护等，
+> 完整清单见 [../README.md](../README.md) 的「浏览器回归探针」一节。
+
 ## 后端测试
 
 ```bash
-go test ./...        # 10 个包，含 signaling 的 e2e（会起真实 Pion 客户端）
+go test ./...        # 11 个包，含 signaling 的 e2e（会起真实 Pion 客户端）
 ```
 
 其中 `signaling/e2e_datachannel_test.go` 断言数据通道的双向中继——**这条测试曾经证明过我的判断是错的**

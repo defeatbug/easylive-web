@@ -76,7 +76,7 @@ export function SidePanel({
         <button
           onClick={onClose}
           title="关闭面板"
-          className="rounded p-1 text-neutral-400 transition hover:bg-white/10 hover:text-neutral-200"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-neutral-400 transition hover:bg-white/10 hover:text-neutral-200"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
             <path d="M6 6l12 12M18 6L6 18" />
@@ -120,8 +120,8 @@ function TabButton({
   return (
     <button
       onClick={onClick}
-      className={`rounded-md px-2.5 py-1.5 text-xs font-medium transition ${
-        active ? 'bg-white/10 text-neutral-100' : 'text-neutral-400 hover:text-neutral-200'
+      className={`inline-flex items-center justify-center h-8 rounded-lg px-2.5 text-xs font-medium transition ${
+        active ? 'bg-white/10 text-white shadow-sm' : 'text-neutral-400 hover:bg-white/5 hover:text-neutral-200'
       }`}
     >
       {children}

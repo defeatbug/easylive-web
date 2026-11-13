@@ -330,15 +330,14 @@ export function JoinPage({ onJoin, user, onLogout, onUserChange }: JoinPageProps
 
           {/* 右：入会前设置（预览 + 设备） */}
           <section className="prejoin-device-card" aria-labelledby="prejoin-device-heading">
-            <div className="prejoin-device-header">
-              <div>
-                <div className="prejoin-section-label">02 / CHECK YOUR SETUP</div>
-                <h2 id="prejoin-device-heading">入会前设置</h2>
-              </div>
+            <div className="prejoin-card-topline">
+              <span>02 / CHECK YOUR SETUP</span>
               <span className={`prejoin-device-status ${deviceState === 'ready' ? 'is-ready' : deviceState === 'error' ? 'is-error' : ''}`}>
                 <span aria-hidden="true" />{deviceState === 'ready' ? '设备已就绪' : deviceState === 'error' ? '设备不可用' : '等待设备授权'}
               </span>
             </div>
+            <h2 id="prejoin-device-heading">入会前设置</h2>
+            <p className="prejoin-card-description">确认摄像头与麦克风状态，以最佳状态加入对话。</p>
 
             <div className="prejoin-camera-stage">
               <video
@@ -402,6 +401,7 @@ export function JoinPage({ onJoin, user, onLogout, onUserChange }: JoinPageProps
             <div className="prejoin-info-card prejoin-info-card-muted">
               <span className="prejoin-info-icon"><IconCalendar size={19} /></span>
               <div><strong>随时开始</strong><p>无需预约，快速会议会生成一个新的会议号。</p></div>
+              <span className="prejoin-info-action prejoin-info-action-ghost"><IconVideo size={14} /> 即开即用</span>
             </div>
           </div>
           <footer className="prejoin-footer"><span>easylive · 轻量实时音视频会议</span><span>为了更好的体验，请使用支持 WebRTC 的浏览器</span></footer>

@@ -475,9 +475,10 @@ export function MeetingRoom({
               }
             }}
             recordingActive={snapshot.recording.active}
-            // 录制对**所有已入会成员**开放（服务端已放行）：录制走数据通道，所以用 canPublishData 作为依据，
-            // 而不是主持人身份——主持人不在线时，成员也该能留个记录。
-            canRecord={snapshot.grants?.canPublishData ?? false}
+            // 录制受主持人权限保护（服务端 handleRecord 强制校验 roomAdmin，并只允许停本房间的会话）。
+            // 这里用 roomAdmin 与协议声明保持一致：曾经服务端放开了校验、前端却用 canPublishData
+            // 作为依据，两边对不上——成员会看到按钮、点了才收到 forbidden。
+            canRecord={snapshot.grants?.roomAdmin ?? false}
             onToggleRecording={() =>
               void client?.setRecording(snapshot.recording.active ? 'stop' : 'start')
             }
@@ -826,7 +827,7 @@ function ConnectionPill({ connection }: { connection: string }) {
     idle: '待连接',
   }
   return (
-    <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${style[connection] ?? style.idle}`}>
+    <span className={`inline-flex items-center h-7 rounded-lg px-2 text-[11px] font-medium border border-white/5 ${style[connection] ?? style.idle}`}>
       {text[connection] ?? connection}
     </span>
   )

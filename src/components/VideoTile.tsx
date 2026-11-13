@@ -100,9 +100,9 @@ export function VideoTile({
   return (
     <div
       ref={wrapRef}
-      className={`group tm-anim-tile relative w-full overflow-hidden rounded-lg ${
+      className={`group tm-anim-tile relative w-full overflow-hidden rounded-xl border border-white/10 shadow-md transition-shadow ${
         fit === 'stage' ? 'h-full bg-black' : 'aspect-video bg-[var(--surface)]'
-      } ${speaking ? 'ring-2 ring-emerald-400' : ''}`}
+      } ${speaking ? 'ring-2 ring-emerald-400 ring-offset-2 ring-offset-[var(--bg)]' : ''}`}
     >
       {hasVideo ? (
         <video
@@ -128,8 +128,8 @@ export function VideoTile({
       )}
 
       {/* 左下角名字条 */}
-      <div className="pointer-events-none absolute bottom-2 left-2 flex items-center gap-1.5">
-        <span className="flex items-center gap-1.5 rounded bg-black/60 px-1.5 py-0.5 text-xs text-white/90">
+      <div className="pointer-events-none absolute bottom-2.5 left-2.5 flex items-center gap-1.5 z-10">
+        <span className="flex items-center gap-1.5 rounded-md bg-black/65 backdrop-blur-md border border-white/10 px-2 py-0.5 text-xs font-medium text-white/90">
           {muted && (
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M9 5a3 3 0 0 1 6 0v4M9 11a3 3 0 0 0 4.5 2.6M5 11a7 7 0 0 0 10 6.2M12 18v3M4 4l16 16" />
@@ -138,7 +138,7 @@ export function VideoTile({
           {label}
         </span>
         {screen && (
-          <span className="rounded bg-black/60 px-1.5 py-0.5 text-[10px] text-sky-300">屏幕共享</span>
+          <span className="rounded-md bg-sky-500/25 backdrop-blur-md border border-sky-400/30 px-1.5 py-0.5 text-[10px] font-semibold text-sky-200">屏幕共享</span>
         )}
         {badge}
       </div>
