@@ -10,8 +10,9 @@ import { fetchRecordings, formatBytes, type RecordingsResponse } from '../lib/re
  *
  * 两点刻意为之：
  *  1. **图表自己画**（SVG），不引图表库：体积小、无依赖，而且论文里说得清每条线怎么来的。
- *  2. 没有数据的字段**明说"未采样"**，不画一条看起来像真的平线——例如 rtt_ms/loss_rate
- *     这两列当前采样器根本没写，恒为 0。
+ *  2. 没有数据的字段**明说"未采样"**，不画一条看起来像真的平线。rtt_ms/loss_rate
+ *     来自客户端每 10s 一次的 `client_metrics` 上报（浏览器 getStats，服务端不解码媒体），
+ *     没有客户端在会时这些桶就是空的（avg 为 0），不是采样器漏写。
  */
 
 interface HistoryPoint {
@@ -172,7 +173,7 @@ export function MetricsPage({ onBack }: { onBack: () => void }) {
                 formatValue={(v) => `${v.toFixed(0)} kbps`}
               />
             </ChartCard>
-            <ChartCard title="RTT / 丢包率" note="⚠ 这两列当前**未被采样**（采样器只写累计包数与字节），因此恒为 0；不画成「看起来正常」的平线">
+            <ChartCard title="RTT / 丢包率" note="这两列来自客户端每 10s 上报（浏览器 getStats；RTT 取被提名候选对、丢包率按采样窗口差分），服务端不解码媒体；无人在会时没有上报，曲线会断开为 0">
               <LineChart
                 points={history}
                 series={[
