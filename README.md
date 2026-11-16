@@ -27,7 +27,7 @@ Vite 把 `/ws`、`/auth`、`/rooms`、`/admin`、`/token`、`/ice`、`/graphql`�
 | 文件 | 作用 |
 |---|---|
 | `src/lib/protocol.ts` | 信令协议类型定义，**必须与 `easylive-api/protocol/protocol.go` 1:1 对齐** |
-| `src/lib/RoomClient.ts` | WebRTC + 信令的唯一持有者（普通 TS 类）：两条 PeerConnection、请求响应匹配、ICE 候选缓存、订阅串行化、指标采集、**断线重连（指数退避 + resumeToken）** |
+| `src/lib/RoomClient.ts` | WebRTC + 信令的唯一持有者（普通 TS 类）：两条 PeerConnection、请求响应匹配、ICE 候选缓存、订阅与发布重协商串行化、指标采集、**断线重连（指数退避 + resumeToken）** |
 | `src/hooks/useRoom.ts` | 用 `useSyncExternalStore` 把 `RoomClient` 接到 React，UI 只消费不可变快照 |
 | `src/pages/LoginPage.tsx` | 登录 / 注册（`AUTH_MODE=off` 时整页不出现，直接以访客身份入会） |
 | `src/pages/JoinPage.tsx` | 会前页：会议号 / 创建会议 + 昵称 + 设备选择与实时预览 |
@@ -49,7 +49,8 @@ Vite 把 `/ws`、`/auth`、`/rooms`、`/admin`、`/token`、`/ice`、`/graphql`�
 2. **ICE 候选要缓存。** 浏览器在 `setRemoteDescription` 之前调用 `addIceCandidate` 会抛错；
    服务端候选往往先于 SDP 到达，因此按 `pub`/`sub` 分别缓存，设置远端描述后再 flush。
 3. **订阅必须串行。** 订阅者连接上服务端是 offerer，并发订阅会在 `have-local-offer` 状态下再创建
-   offer 而失败。`RoomClient` 用一条 Promise 队列把订阅串起来。
+   offer 而失败。`RoomClient` 用一条 Promise 队列把订阅串起来。发布重协商同理（发布媒体、开/关屏幕共享、
+   ICE restart 都会触发 offer），用另一条队列保证同一时刻只有一个 offer 在途，否则会撞 `InvalidStateError`。
 4. **断线恢复的身份标识必须由客户端持久化。** 页面刷新时浏览器直接杀掉进程，`leave` 发不出去，
    服务端只能把参与者标记为"重连中"并进入 30s 宽限期。重连时若不带 `resumeToken`，
    服务端会当成**新参与者**：刷新几次就会出现一屏"重连中"的幽灵（还会占满人数上限）。
@@ -105,9 +106,16 @@ node scripts/dock-probe.mjs      # 默认打 https://localhost:5173 + http://loc
 
 ## 已知限制（下一步）
 
-> 核实于 2026-10-19。**断线重连**（指数退避 8 次、配合服务端 30s 宽限期）与**业务接口**
-> （REST `/rooms` / `/auth` / `/admin`，前端已全部接上）都已交付，不再列在这里。
+> 核实于 2026-11-16。以下三件事已经做完了，不再列在"未完成"里：
+>
+> - 断线重连：`RoomClient` 用 `resumeToken` 在服务端宽限期内恢复同一身份，超时后走全量重连并复用本地流重新发布；
+> - 会议创建/查询：`/rooms`、`/rooms/mine` 已接入（`src/lib/rooms.ts`），不再只能靠 URL 参数传房间号；
+> - 鉴权与账号：JWT 令牌、登录/注册、头像上传、管理员用户管理页、指标报表页都已接通。
 
+真正还没做的：
+
+- **没有前端单测框架**：验证手段是 `tsc --noEmit` + `vite build` + `scripts/*-probe.mjs` 的真实浏览器探针；
+  `RoomClient` 这类纯逻辑缺少可重复的单元回归，回归成本偏高。
 - **宫格没有分页/虚拟滚动**：`MeetingRoom.tsx` 的 `GridView` 只有固定断点（1 / 2 / 3 列），
   超过 9 路会一路往下排。实测 20 路时浏览器的解码能力会先成为瓶颈，所以暂时够用。
 - **屏幕共享在 Safari 上受系统限制**：建议用 Chrome 演示（这条未在 Safari 上做过回归）。
@@ -115,5 +123,7 @@ node scripts/dock-probe.mjs      # 默认打 https://localhost:5173 + http://loc
   （`-c copy` 转成 WebM），不在服务端转码——见 easylive-api README 的「会议录制」。
 - **AI 功能依赖本机配置**：本地 whisper 模型与 `DEEPSEEK_API_KEY` 缺任意一个，界面只会显示"未配置"。
   配置步骤与两个真实踩过的 `.env` 坑见 `easylive-api/docs/ai-setup.md`。
+- **逐轨道的网络质量角标**（每个瓦片右下角的信号柱）：目前只有全局指标（顶栏 / 指标面板），
+  没有按 track 统计的数据源；`VideoTile` 因此不再暴露一个永远拿不到值的 `quality` prop。
 - **后端的媒体面缺口不在前端可补范围**：GOP 缓存、simulcast/自适应码率、容量隔离等，
   见 `easylive-api/README.md` 的「尚未实现 / 已知限制」。
